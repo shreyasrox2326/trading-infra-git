@@ -13,8 +13,11 @@ from trading_infra.storage.remote import (
     download_strategy_artifacts,
     list_daily_stock_data_keys,
     load_daily_stock_data_from_r2,
+    load_daily_stock_data_range_from_r2,
     load_strategy_registry_from_r2,
     upload_backtest_decisions,
+    upload_strategy_artifacts,
+    upload_strategy_registry,
 )
 
 
@@ -125,6 +128,77 @@ def test_load_daily_stock_data_from_r2(monkeypatch, tmp_path) -> None:
     assert loaded.get_column("symbol").to_list() == ["AAA"]
 
 
+def test_load_daily_stock_data_range_from_r2_spans_multiple_months(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    january = tmp_path / "january.parquet"
+    february = tmp_path / "february.parquet"
+    pl.DataFrame(
+        [
+            {
+                "date": date(2026, 1, 31),
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "series": "EQ",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "prev_close": 99.0,
+                "vwap": 100.0,
+                "volume": 1000,
+                "turnover": 100000.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 100.0,
+                "adj_high": 101.0,
+                "adj_low": 99.0,
+                "adj_close": 100.0,
+                "adj_factor": 1.0,
+            }
+        ]
+    ).write_parquet(january)
+    pl.DataFrame(
+        [
+            {
+                "date": date(2026, 2, 1),
+                "exchange": "NSE",
+                "isin": "INE000000002",
+                "symbol": "BBB",
+                "series": "EQ",
+                "open": 110.0,
+                "high": 111.0,
+                "low": 109.0,
+                "close": 110.0,
+                "prev_close": 108.0,
+                "vwap": 110.0,
+                "volume": 1000,
+                "turnover": 110000.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 110.0,
+                "adj_high": 111.0,
+                "adj_low": 109.0,
+                "adj_close": 110.0,
+                "adj_factor": 1.0,
+            }
+        ]
+    ).write_parquet(february)
+    client.upload_file(january, "data/daily_stock_data/exchange=NSE/year=2026/month=01/part-1.parquet")
+    client.upload_file(february, "data/daily_stock_data/exchange=NSE/year=2026/month=02/part-1.parquet")
+
+    loaded = load_daily_stock_data_range_from_r2(
+        client,
+        exchange="NSE",
+        start_date=date(2026, 1, 31),
+        end_date=date(2026, 2, 1),
+    )
+
+    assert loaded.get_column("symbol").to_list() == ["AAA", "BBB"]
+
+
 def test_download_strategy_artifacts(monkeypatch, tmp_path) -> None:
     client = _fake_client(monkeypatch)
     client.upload_text("strategies/momentum_v1/config.yaml", "top_n: 5")
@@ -136,6 +210,20 @@ def test_download_strategy_artifacts(monkeypatch, tmp_path) -> None:
     assert (root / "metadata.json").read_text(encoding="utf-8") == '{"strategy_type": "top_n_adj_close"}'
 
 
+def test_upload_strategy_artifacts(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    strategy_root = tmp_path / "strategies" / "momentum_v1"
+    strategy_root.mkdir(parents=True)
+    (strategy_root / "config.yaml").write_text("top_n: 5", encoding="utf-8")
+    (strategy_root / "metadata.json").write_text('{"strategy_type": "top_n_adj_close"}', encoding="utf-8")
+    (strategy_root / "feature_config.yaml").write_text("lookback: 20", encoding="utf-8")
+
+    upload_strategy_artifacts(client, "momentum_v1", tmp_path)
+
+    assert "strategies/momentum_v1/config.yaml" in client._client.objects  # type: ignore[attr-defined]
+    assert "strategies/momentum_v1/feature_config.yaml" in client._client.objects  # type: ignore[attr-defined]
+
+
 def test_load_strategy_registry_from_r2(monkeypatch, tmp_path) -> None:
     client = _fake_client(monkeypatch)
     registry_path = tmp_path / "strategies.parquet"
@@ -145,6 +233,16 @@ def test_load_strategy_registry_from_r2(monkeypatch, tmp_path) -> None:
     loaded = load_strategy_registry_from_r2(client)
 
     assert loaded.get_column("strategy_id").to_list() == ["momentum_v1"]
+
+
+def test_upload_strategy_registry(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    registry_path = tmp_path / "strategies.parquet"
+    pl.DataFrame([{"strategy_id": "momentum_v1", "version": "v1", "status": "active"}]).write_parquet(registry_path)
+
+    upload_strategy_registry(client, registry_path)
+
+    assert registry_strategies_key() in client._client.objects  # type: ignore[attr-defined]
 
 
 def test_download_paper_decisions_returns_empty_when_missing(monkeypatch) -> None:

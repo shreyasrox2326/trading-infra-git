@@ -30,6 +30,16 @@ def strategy_feature_config_key(strategy_id: str) -> str:
     return str(PurePosixPath(strategy_prefix(strategy_id)) / "feature_config.yaml")
 
 
+def strategy_artifact_keys(strategy_id: str) -> dict[str, str]:
+    """Return canonical strategy artifact keys by logical name."""
+    return {
+        "config": strategy_config_key(strategy_id),
+        "metadata": strategy_metadata_key(strategy_id),
+        "model": strategy_model_key(strategy_id),
+        "feature_config": strategy_feature_config_key(strategy_id),
+    }
+
+
 def registry_strategies_key() -> str:
     """Return the strategy registry object key."""
     return str(PurePosixPath("registry") / "strategies.parquet")
