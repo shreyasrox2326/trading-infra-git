@@ -6,6 +6,39 @@ The system is for **pure technical, individual-stock strategies**.
 
 Each strategy uses only historical price-volume data for each stock. No fundamentals, news, options, tick data, or order book data are included initially.
 
+## Getting Started
+
+Operator and setup docs live in:
+
+- `docs/operator-runbook.md`
+- `docs/strategy-contract.md`
+
+Primary local CLI entrypoints:
+
+- `python -m trading_infra backtest-run`
+- `python -m trading_infra paper-dry-run`
+- `python -m trading_infra strategy-upload`
+- `python -m trading_infra registry-upload`
+- `python -m trading_infra backtest-upload`
+
+## Git Boundary
+
+This repo intentionally tracks:
+
+- source code
+- tests
+- GitHub Actions workflows
+- documentation
+- example strategy assets under `examples/`
+
+This repo intentionally does **not** track local/operator working state such as:
+
+- `.env`
+- `data/`
+- `decisions/`
+- `registry/`
+- `strategies/`
+
 ---
 
 ## Core Split
@@ -347,8 +380,8 @@ R2 credentials are stored as GitHub Actions secrets:
 ```text
 R2_ACCESS_KEY_ID
 R2_SECRET_ACCESS_KEY
-R2_ENDPOINT_URL
-R2_BUCKET
+R2_S3_API
+R2_BUCKET_NAME
 ```
 
 ---

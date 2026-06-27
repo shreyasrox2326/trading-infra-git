@@ -12,8 +12,8 @@ Record these values:
 
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
-- `R2_ENDPOINT_URL`
-- `R2_BUCKET`
+- `R2_S3_API`
+- `R2_BUCKET_NAME`
 
 Upload or sync the initial market-data layout:
 
@@ -82,8 +82,8 @@ In GitHub repository settings, add these Actions secrets:
 
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
-- `R2_ENDPOINT_URL`
-- `R2_BUCKET`
+- `R2_S3_API`
+- `R2_BUCKET_NAME`
 
 Then trigger the `Daily Paper Trading` workflow manually using `workflow_dispatch`.
 
