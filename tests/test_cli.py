@@ -7,6 +7,7 @@ import pytest
 
 from trading_infra.cli import main
 from trading_infra.decisions import decisions_frame
+from trading_infra.data.bhavcopy import bhavcopy_archive_name
 from trading_infra.storage.config import R2Config
 from trading_infra.storage.r2 import R2Client
 
@@ -402,3 +403,65 @@ def test_market_data_upload(capsys, monkeypatch, tmp_path) -> None:
     assert exit_code == 0
     assert "market-data-upload paths=1 partitions=1" in captured
     assert "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet" in fake_client.objects
+
+
+def test_bhavcopy_fetch_cli(capsys, monkeypatch, tmp_path) -> None:
+    class _Result:
+        def __init__(self):
+            self.status = "downloaded"
+            self.requested_date = date(2026, 1, 2)
+            self.path = tmp_path / "cm02JAN2026bhav.csv.zip"
+            self.message = ""
+
+    monkeypatch.setattr("trading_infra.cli.fetch_bhavcopy_archives", lambda **_kwargs: [_Result()])
+
+    exit_code = main(
+        [
+            "bhavcopy-fetch",
+            "--exchange",
+            "NSE",
+            "--start-date",
+            "2026-01-02",
+            "--end-date",
+            "2026-01-02",
+            "--output-path",
+            str(tmp_path),
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "bhavcopy-fetch exchange=NSE" in captured
+    assert "downloaded" in captured
+    assert (tmp_path / "bhavcopy-fetch.log").exists()
+
+
+def test_bhavcopy_ingest_cli(capsys, tmp_path) -> None:
+    from zipfile import ZipFile
+
+    source = tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
+    csv = (
+        "SYMBOL,SERIES,OPEN,HIGH,LOW,CLOSE,LAST,PREVCLOSE,TOTTRDQTY,TOTTRDVAL,"
+        "TIMESTAMP,TOTALTRADES,ISIN\n"
+        "ABC,EQ,100,101,99,100.5,100.5,98,1000,100500,02-JAN-2026,100,INE000000001\n"
+    )
+    with ZipFile(source, "w") as archive:
+        archive.writestr("cm02JAN2026bhav.csv", csv)
+    output = tmp_path / "daily_stock_data.parquet"
+
+    exit_code = main(
+        [
+            "bhavcopy-ingest",
+            "--input-path",
+            str(tmp_path),
+            "--output-path",
+            str(output),
+            "--exchange",
+            "NSE",
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "bhavcopy-ingest input_path=" in captured
+    assert pl.read_parquet(output).get_column("symbol").to_list() == ["ABC"]

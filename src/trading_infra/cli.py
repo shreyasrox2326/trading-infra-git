@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Sequence
 
+from trading_infra.data.bhavcopy import fetch_bhavcopy_archives, write_canonical_bhavcopy_parquet
 from trading_infra.data.market_data import load_daily_stock_data
 from trading_infra.pipelines.backtest import run_backtest
 from trading_infra.pipelines.paper import run_daily_paper_job, run_daily_paper_job_from_r2
@@ -67,6 +68,22 @@ def build_parser() -> argparse.ArgumentParser:
     market_data_upload.add_argument("--path", action="append", required=True)
     market_data_upload.add_argument("--date-from")
     market_data_upload.add_argument("--date-to")
+
+    bhavcopy_fetch = subparsers.add_parser("bhavcopy-fetch", help="Fetch NSE equity bhavcopy archives locally.")
+    bhavcopy_fetch.add_argument("--exchange", default="NSE")
+    bhavcopy_fetch.add_argument("--start-date", required=True)
+    bhavcopy_fetch.add_argument("--end-date", required=True)
+    bhavcopy_fetch.add_argument("--output-path", required=True)
+    bhavcopy_fetch.add_argument("--log-path")
+    bhavcopy_fetch.add_argument("--overwrite", action="store_true")
+
+    bhavcopy_ingest = subparsers.add_parser(
+        "bhavcopy-ingest",
+        help="Normalize raw NSE bhavcopy files into canonical daily-stock parquet.",
+    )
+    bhavcopy_ingest.add_argument("--input-path", required=True)
+    bhavcopy_ingest.add_argument("--output-path", required=True)
+    bhavcopy_ingest.add_argument("--exchange", default="NSE")
 
     return parser
 
@@ -219,6 +236,55 @@ def market_data_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def bhavcopy_fetch(args: argparse.Namespace) -> int:
+    if args.exchange != "NSE":
+        raise ValueError("bhavcopy-fetch currently supports only --exchange NSE.")
+    results = fetch_bhavcopy_archives(
+        start_date=_parse_date(args.start_date),
+        end_date=_parse_date(args.end_date),
+        output_path=args.output_path,
+        overwrite=args.overwrite,
+    )
+    counts: dict[str, int] = {}
+    for result in results:
+        counts[result.status] = counts.get(result.status, 0) + 1
+    print(
+        f"bhavcopy-fetch exchange={args.exchange} start_date={args.start_date} "
+        f"end_date={args.end_date} output_path={args.output_path} counts={counts}"
+    )
+    failures = [result for result in results if result.status == "failed"]
+    log_path = Path(args.log_path) if args.log_path else Path(args.output_path) / "bhavcopy-fetch.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        "\n".join(
+            f"{result.requested_date},{result.status},{result.path.as_posix() if result.path else ''},{result.message}"
+            for result in results
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"bhavcopy-fetch log={log_path.as_posix()}")
+    for failure in failures[:10]:
+        print(f"failed date={failure.requested_date} message={failure.message}")
+    return 1 if failures else 0
+
+
+def bhavcopy_ingest(args: argparse.Namespace) -> int:
+    output_path, summary = write_canonical_bhavcopy_parquet(
+        input_path=args.input_path,
+        output_path=args.output_path,
+        exchange=args.exchange,
+    )
+    print(
+        f"bhavcopy-ingest input_path={args.input_path} output_path={output_path.as_posix()} "
+        f"rows={summary.rows} date_min={summary.date_min} date_max={summary.date_max} "
+        f"exchanges={summary.exchanges} symbols={summary.symbols} "
+        f"missing_deliverable_qty={summary.missing_deliverable_qty} "
+        f"missing_delivery_pct={summary.missing_delivery_pct}"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -235,5 +301,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return backtest_upload(args)
     if args.command == "market-data-upload":
         return market_data_upload(args)
+    if args.command == "bhavcopy-fetch":
+        return bhavcopy_fetch(args)
+    if args.command == "bhavcopy-ingest":
+        return bhavcopy_ingest(args)
     parser.error(f"Unsupported command: {args.command}")
     return 2

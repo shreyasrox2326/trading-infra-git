@@ -30,6 +30,23 @@ python -m trading_infra market-data-upload \
 
 The command validates the canonical market-data schema, rewrites monthly `exchange/year/month` partitions locally, removes stale parquet objects under each targeted R2 partition prefix, and uploads a single canonical `part.parquet` per partition.
 
+To build canonical parquet from NSE equity bhavcopy archives first:
+
+```bash
+python -m trading_infra bhavcopy-fetch \
+  --exchange NSE \
+  --start-date 2020-01-01 \
+  --end-date 2026-01-31 \
+  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy
+
+python -m trading_infra bhavcopy-ingest \
+  --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
+  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data.parquet \
+  --exchange NSE
+```
+
+The first ingestion version uses identity adjustment: `adj_open/open`, `adj_high/high`, `adj_low/low`, `adj_close/close`, and `adj_factor=1.0`. Delivery fields may be null when they are not present in the source bhavcopy file.
+
 ## 2. Local Strategy Preparation
 
 Create a versioned local strategy folder under `strategies/<strategy_id>/` only when preparing a new strategy version for first upload to R2.

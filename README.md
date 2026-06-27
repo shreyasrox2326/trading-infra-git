@@ -18,6 +18,8 @@ Primary local CLI entrypoints:
 
 - `python -m trading_infra backtest-run`
 - `python -m trading_infra paper-dry-run`
+- `python -m trading_infra bhavcopy-fetch`
+- `python -m trading_infra bhavcopy-ingest`
 - `python -m trading_infra market-data-upload`
 - `python -m trading_infra strategy-upload`
 - `python -m trading_infra registry-upload`
