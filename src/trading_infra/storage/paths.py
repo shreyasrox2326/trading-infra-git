@@ -10,6 +10,37 @@ def strategy_prefix(strategy_id: str) -> str:
     return str(PurePosixPath("strategies") / strategy_id)
 
 
+def strategy_config_key(strategy_id: str) -> str:
+    """Return the canonical config key for a strategy."""
+    return str(PurePosixPath(strategy_prefix(strategy_id)) / "config.yaml")
+
+
+def strategy_metadata_key(strategy_id: str) -> str:
+    """Return the canonical metadata key for a strategy."""
+    return str(PurePosixPath(strategy_prefix(strategy_id)) / "metadata.json")
+
+
+def strategy_model_key(strategy_id: str, *, filename: str = "model.pkl") -> str:
+    """Return the canonical model key for a strategy."""
+    return str(PurePosixPath(strategy_prefix(strategy_id)) / filename)
+
+
+def registry_strategies_key() -> str:
+    """Return the strategy registry object key."""
+    return str(PurePosixPath("registry") / "strategies.parquet")
+
+
+def daily_stock_data_prefix(exchange: str, year: int, month: int) -> str:
+    """Return the canonical prefix for monthly daily-stock parquet data."""
+    return str(
+        PurePosixPath("data")
+        / "daily_stock_data"
+        / f"exchange={exchange}"
+        / f"year={year}"
+        / f"month={month:02d}"
+    )
+
+
 def backtest_decisions_key(strategy_id: str) -> str:
     """Return the canonical backtest decisions object key."""
     return str(PurePosixPath("decisions") / "backtest" / strategy_id / "decisions.parquet")
