@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date
 from pathlib import Path
+from pathlib import PurePosixPath
 from tempfile import TemporaryDirectory
 
 import polars as pl
@@ -11,7 +13,7 @@ import polars as pl
 from trading_infra.data.market_data import load_daily_stock_data
 from trading_infra.decisions import empty_decisions_frame
 from trading_infra.registry import load_strategy_registry
-from trading_infra.storage.decisions import read_decisions_parquet
+from trading_infra.storage.decisions import read_decisions_parquet, write_decisions_parquet
 from trading_infra.storage.paths import (
     backtest_decisions_key,
     daily_stock_data_prefix,
@@ -47,6 +49,48 @@ def list_daily_stock_data_keys(client: R2Client, exchange: str, year: int, month
     return [key for key in client.list_keys(prefix) if key.endswith(".parquet")]
 
 
+def list_daily_stock_data_months(client: R2Client, exchange: str) -> list[tuple[int, int]]:
+    """List available `(year, month)` partitions for an exchange."""
+    prefix = str(PurePosixPath("data") / "daily_stock_data" / f"exchange={exchange}")
+    months: set[tuple[int, int]] = set()
+    for key in client.list_keys(prefix):
+        if not key.endswith(".parquet"):
+            continue
+        parts = PurePosixPath(key).parts
+        year = next((part for part in parts if part.startswith("year=")), None)
+        month = next((part for part in parts if part.startswith("month=")), None)
+        if year is None or month is None:
+            continue
+        months.add((int(year.split("=", 1)[1]), int(month.split("=", 1)[1])))
+    return sorted(months)
+
+
+def _load_daily_stock_data_for_keys(
+    client: R2Client,
+    *,
+    keys: list[str],
+    exchange: str,
+    end_date: date,
+    symbols: list[str] | None = None,
+    columns: list[str] | None = None,
+) -> pl.DataFrame:
+    """Download parquet keys and load them through the local parquet loader."""
+    with TemporaryDirectory() as tmpdir:
+        local_paths: list[str] = []
+        for index, key in enumerate(keys):
+            local_path = Path(tmpdir) / f"part-{index}.parquet"
+            client.download_file(key, local_path)
+            local_paths.append(str(local_path))
+
+        return load_daily_stock_data(
+            local_paths,
+            as_of_date=end_date,
+            exchanges=[exchange],
+            symbols=symbols,
+            columns=columns,
+        )
+
+
 def load_daily_stock_data_from_r2(
     client: R2Client,
     *,
@@ -63,21 +107,15 @@ def load_daily_stock_data_from_r2(
         raise FileNotFoundError(
             f"No market-data parquet objects found for exchange={exchange}, year={year}, month={month:02d}."
         )
-
-    with TemporaryDirectory() as tmpdir:
-        local_paths: list[str] = []
-        for index, key in enumerate(keys):
-            local_path = Path(tmpdir) / f"part-{index}.parquet"
-            client.download_file(key, local_path)
-            local_paths.append(str(local_path))
-
-        return load_daily_stock_data(
-            local_paths,
-            as_of_date=as_of_date,
-            exchanges=[exchange],
-            symbols=symbols,
-            columns=columns,
-        )
+    end_date = as_of_date if as_of_date is not None else date(year, month, monthrange(year, month)[1])
+    return _load_daily_stock_data_for_keys(
+        client,
+        keys=keys,
+        exchange=exchange,
+        end_date=end_date,
+        symbols=symbols,
+        columns=columns,
+    )
 
 
 def load_daily_stock_data_range_from_r2(
@@ -91,28 +129,57 @@ def load_daily_stock_data_range_from_r2(
 ) -> pl.DataFrame:
     """Download all monthly partitions needed for a date range and load them locally."""
     months = _month_starts(start_date, end_date)
+    keys: list[str] = []
+    for year, month in months:
+        month_keys = list_daily_stock_data_keys(client, exchange, year, month)
+        if not month_keys:
+            raise FileNotFoundError(
+                f"Missing market-data parquet objects for exchange={exchange}, year={year}, month={month:02d}."
+            )
+        keys.extend(month_keys)
 
-    with TemporaryDirectory() as tmpdir:
-        local_paths: list[str] = []
-        for year, month in months:
-            keys = list_daily_stock_data_keys(client, exchange, year, month)
-            if not keys:
-                raise FileNotFoundError(
-                    f"Missing market-data parquet objects for exchange={exchange}, year={year}, month={month:02d}."
-                )
-            for index, key in enumerate(keys):
-                local_path = Path(tmpdir) / f"{year}-{month:02d}-{index}.parquet"
-                client.download_file(key, local_path)
-                local_paths.append(str(local_path))
+    loaded = _load_daily_stock_data_for_keys(
+        client,
+        keys=keys,
+        exchange=exchange,
+        end_date=end_date,
+        symbols=symbols,
+        columns=columns,
+    )
+    return loaded.filter(pl.col("date") >= start_date)
 
-        loaded = load_daily_stock_data(
-            local_paths,
-            as_of_date=end_date,
-            exchanges=[exchange],
-            symbols=symbols,
-            columns=columns,
+
+def load_daily_stock_data_history_from_r2(
+    client: R2Client,
+    *,
+    exchange: str,
+    end_date: date,
+    symbols: list[str] | None = None,
+    columns: list[str] | None = None,
+) -> pl.DataFrame:
+    """Load all available history for an exchange up to `end_date`."""
+    months = [
+        (year, month)
+        for year, month in list_daily_stock_data_months(client, exchange)
+        if (year, month) <= (end_date.year, end_date.month)
+    ]
+    if not months:
+        raise FileNotFoundError(
+            f"No market-data parquet objects found for exchange={exchange} up to {end_date.isoformat()}."
         )
-        return loaded.filter(pl.col("date") >= start_date)
+
+    keys: list[str] = []
+    for year, month in months:
+        keys.extend(list_daily_stock_data_keys(client, exchange, year, month))
+
+    return _load_daily_stock_data_for_keys(
+        client,
+        keys=keys,
+        exchange=exchange,
+        end_date=end_date,
+        symbols=symbols,
+        columns=columns,
+    )
 
 
 def download_strategy_artifacts(client: R2Client, strategy_id: str, target_dir: str | Path) -> Path:
@@ -164,18 +231,30 @@ def upload_strategy_artifacts(client: R2Client, strategy_id: str, base_path: str
 
 
 def upload_strategy_registry(client: R2Client, local_path: str | Path) -> None:
-    """Upload a local strategy registry parquet file to R2."""
-    client.upload_file(local_path, registry_strategies_key())
+    """Upload a validated local strategy registry parquet file to R2."""
+    validated = load_strategy_registry(local_path)
+    with TemporaryDirectory() as tmpdir:
+        normalized_path = Path(tmpdir) / "strategies.parquet"
+        validated.write_parquet(normalized_path)
+        client.upload_file(normalized_path, registry_strategies_key())
 
 
 def upload_backtest_decisions(client: R2Client, strategy_id: str, local_path: str | Path) -> None:
-    """Upload a local backtest decisions parquet file to R2."""
-    client.upload_file(local_path, backtest_decisions_key(strategy_id))
+    """Upload a validated local backtest decisions parquet file to R2."""
+    validated = read_decisions_parquet(local_path)
+    with TemporaryDirectory() as tmpdir:
+        normalized_path = Path(tmpdir) / "decisions.parquet"
+        validated.write_parquet(normalized_path)
+        client.upload_file(normalized_path, backtest_decisions_key(strategy_id))
 
 
 def upload_paper_decisions(client: R2Client, strategy_id: str, local_path: str | Path) -> None:
-    """Upload a local paper decisions parquet file to R2."""
-    client.upload_file(local_path, paper_decisions_key(strategy_id))
+    """Upload a validated local paper decisions parquet file to R2."""
+    validated = read_decisions_parquet(local_path)
+    with TemporaryDirectory() as tmpdir:
+        normalized_path = Path(tmpdir) / "decisions.parquet"
+        write_decisions_parquet(normalized_path, validated)
+        client.upload_file(normalized_path, paper_decisions_key(strategy_id))
 
 
 def download_paper_decisions(client: R2Client, strategy_id: str) -> pl.DataFrame:

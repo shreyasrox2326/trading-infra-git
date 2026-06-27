@@ -21,9 +21,18 @@ Upload or sync the initial market-data layout:
 data/daily_stock_data/exchange=NSE/year=YYYY/month=MM/*.parquet
 ```
 
+For one-time historical setup from local canonical parquet files, use:
+
+```bash
+python -m trading_infra market-data-upload \
+  --path /workspaces/code/trading-infra-git/data/import/full_history.parquet
+```
+
+The command validates the canonical market-data schema, rewrites monthly `exchange/year/month` partitions locally, removes stale parquet objects under each targeted R2 partition prefix, and uploads a single canonical `part.parquet` per partition.
+
 ## 2. Local Strategy Preparation
 
-Create a versioned local strategy folder under `strategies/<strategy_id>/`.
+Create a versioned local strategy folder under `strategies/<strategy_id>/` only when preparing a new strategy version for first upload to R2.
 
 Minimum files:
 
@@ -31,6 +40,8 @@ Minimum files:
 - `metadata.json`
 
 For the current supported strategy type, use the example in `examples/strategies/top_n_adj_close_v1/`.
+
+After the strategy version is uploaded, treat R2 as the canonical source. Local `strategies/`, `registry/`, and `decisions/` directories are workspace/cache state only.
 
 ## 3. Local Backtest
 
@@ -44,6 +55,22 @@ python -m trading_infra backtest-run \
   --start-date 2026-01-01 \
   --end-date 2026-01-31
 ```
+
+Or run the historical backtest directly against R2-backed market data:
+
+```bash
+python -m trading_infra backtest-run \
+  --base-path /workspaces/code/trading-infra-git \
+  --strategy-id top_n_adj_close_v1 \
+  --use-r2 \
+  --exchange NSE \
+  --start-date 2026-01-01 \
+  --end-date 2026-01-31
+```
+
+In the R2-backed mode, the CLI downloads strategy artifacts from R2 and loads all available market history up to `end-date` before emitting decisions only for the requested `start-date` to `end-date` window. This preserves warm-up history for blackbox strategies.
+
+If the historical market-data input parquet is very large, do the heavy normalization locally first and then point `market-data-upload` at the resulting canonical parquet file or directory of parquet files.
 
 Inspect the resulting file:
 
@@ -68,6 +95,8 @@ python -m trading_infra backtest-upload \
   --strategy-id top_n_adj_close_v1 \
   --path /workspaces/code/trading-infra-git/decisions/backtest/top_n_adj_close_v1/decisions.parquet
 ```
+
+The upload commands validate and rewrite the local Parquet before publishing, so only canonical registry and decision schemas are stored in R2.
 
 Upload the registry:
 
@@ -109,7 +138,10 @@ Then verify:
 - registry exists under `registry/strategies.parquet`
 - backtest decisions exist under `decisions/backtest/<strategy_id>/decisions.parquet`
 - paper decisions are created or updated under `decisions/paper/<strategy_id>/decisions.parquet`
+- R2-backed paper runs append to existing `decisions/paper/<strategy_id>/decisions.parquet` history instead of replacing it
 - rerunning the same date does not create duplicate paper rows
+
+The R2-backed paper flow also loads all available market history up to the requested date so lookback-dependent strategies receive full context.
 
 ## 7. Current Limitation
 

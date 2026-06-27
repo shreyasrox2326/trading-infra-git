@@ -6,6 +6,7 @@ import polars as pl
 import pytest
 
 from trading_infra.cli import main
+from trading_infra.decisions import decisions_frame
 from trading_infra.storage.config import R2Config
 from trading_infra.storage.r2 import R2Client
 
@@ -79,6 +80,21 @@ def _write_strategy_files(base_path) -> None:
         json.dumps({"strategy_type": "top_n_adj_close", "version": "v1"}),
         encoding="utf-8",
     )
+
+
+def _upload_strategy_files(fake_client: "_FakeS3Client", base_path, strategy_id: str = "momentum_v1") -> None:
+    strategy_root = base_path / "strategy-upload" / strategy_id
+    strategy_root.mkdir(parents=True)
+    (strategy_root / "config.yaml").write_text(
+        f"strategy_type: top_n_adj_close\nstrategy_id: {strategy_id}\ntop_n: 1\n",
+        encoding="utf-8",
+    )
+    (strategy_root / "metadata.json").write_text(
+        json.dumps({"strategy_type": "top_n_adj_close", "version": "v1"}),
+        encoding="utf-8",
+    )
+    fake_client.objects[f"strategies/{strategy_id}/config.yaml"] = (strategy_root / "config.yaml").read_bytes()
+    fake_client.objects[f"strategies/{strategy_id}/metadata.json"] = (strategy_root / "metadata.json").read_bytes()
 
 
 class _FakePaginator:
@@ -189,6 +205,97 @@ def test_backtest_run_writes_output(capsys, tmp_path) -> None:
     captured = capsys.readouterr().out
     assert exit_code == 0
     assert "backtest-run strategy_id=momentum_v1" in captured
+    assert "source=local market_data_path=" in captured
+
+
+def test_backtest_run_supports_r2(capsys, monkeypatch, tmp_path) -> None:
+    fake_client = _patch_r2(monkeypatch)
+    _upload_strategy_files(fake_client, tmp_path)
+    market_path = tmp_path / "market.parquet"
+    _market_data_frame().write_parquet(market_path)
+    fake_client.objects["data/daily_stock_data/exchange=NSE/year=2026/month=01/part-1.parquet"] = (
+        market_path.read_bytes()
+    )
+
+    exit_code = main(
+        [
+            "backtest-run",
+            "--base-path",
+            str(tmp_path),
+            "--strategy-id",
+            "momentum_v1",
+            "--use-r2",
+            "--exchange",
+            "NSE",
+            "--start-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-01-02",
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "source=r2 exchange=NSE strategy_source=r2 market_history=full" in captured
+
+
+def test_backtest_run_r2_uses_full_history(monkeypatch, capsys, tmp_path) -> None:
+    fake_client = _patch_r2(monkeypatch)
+    _upload_strategy_files(fake_client, tmp_path)
+    market_path = tmp_path / "market.parquet"
+    _market_data_frame().write_parquet(market_path)
+    fake_client.objects["data/daily_stock_data/exchange=NSE/year=2026/month=01/part-1.parquet"] = (
+        market_path.read_bytes()
+    )
+
+    class _HistoryAwareStrategy:
+        strategy_id = "momentum_v1"
+
+        def run(self, context):
+            dates = context.market_data.get_column("date").unique().sort().to_list()
+            if len(dates) < 2:
+                return decisions_frame([])
+            day = context.market_data.filter(pl.col("date") == context.as_of_date).head(1)
+            row = day.iter_rows(named=True).__next__()
+            return decisions_frame(
+                [
+                    {
+                        "date": context.as_of_date,
+                        "strategy_id": self.strategy_id,
+                        "exchange": row["exchange"],
+                        "isin": row["isin"],
+                        "symbol": row["symbol"],
+                        "target_weight": 1.0,
+                        "rank": 1,
+                        "score": 1.0,
+                    }
+                ]
+            )
+
+    monkeypatch.setattr("trading_infra.cli.build_strategy", lambda _stored: _HistoryAwareStrategy())
+
+    exit_code = main(
+        [
+            "backtest-run",
+            "--base-path",
+            str(tmp_path),
+            "--strategy-id",
+            "momentum_v1",
+            "--use-r2",
+            "--exchange",
+            "NSE",
+            "--start-date",
+            "2026-01-02",
+            "--end-date",
+            "2026-01-02",
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    output = pl.read_parquet(tmp_path / "decisions" / "backtest" / "momentum_v1" / "decisions.parquet")
+    assert exit_code == 0
+    assert "rows=1" in captured
+    assert output.get_column("date").to_list() == [date(2026, 1, 2)]
 
 
 def test_paper_dry_run_requires_market_data_without_r2(tmp_path) -> None:
@@ -232,7 +339,7 @@ def test_registry_upload(capsys, monkeypatch, tmp_path) -> None:
 
     captured = capsys.readouterr().out
     assert exit_code == 0
-    assert "registry-upload path=" in captured
+    assert "registry-upload rows=1 path=" in captured
     assert "registry/strategies.parquet" in fake_client.objects
 
 
@@ -258,5 +365,40 @@ def test_backtest_upload(capsys, monkeypatch, tmp_path) -> None:
 
     captured = capsys.readouterr().out
     assert exit_code == 0
-    assert "backtest-upload strategy_id=momentum_v1" in captured
+    assert "backtest-upload strategy_id=momentum_v1 rows=1" in captured
     assert "decisions/backtest/momentum_v1/decisions.parquet" in fake_client.objects
+
+
+def test_backtest_upload_rejects_invalid_decisions(monkeypatch, tmp_path) -> None:
+    _patch_r2(monkeypatch)
+    decisions_path = tmp_path / "decisions.parquet"
+    pl.DataFrame(
+        [
+            {
+                "date": date(2026, 1, 2),
+                "strategy_id": "momentum_v1",
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "target_weight": -1.0,
+                "rank": 1,
+                "score": 100.0,
+            }
+        ]
+    ).write_parquet(decisions_path)
+
+    with pytest.raises(ValueError, match="negative target weights"):
+        main(["backtest-upload", "--strategy-id", "momentum_v1", "--path", str(decisions_path)])
+
+
+def test_market_data_upload(capsys, monkeypatch, tmp_path) -> None:
+    fake_client = _patch_r2(monkeypatch)
+    market_path = tmp_path / "market.parquet"
+    _market_data_frame().write_parquet(market_path)
+
+    exit_code = main(["market-data-upload", "--path", str(market_path)])
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "market-data-upload paths=1 partitions=1" in captured
+    assert "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet" in fake_client.objects

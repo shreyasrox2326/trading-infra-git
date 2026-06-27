@@ -12,11 +12,13 @@ Operator and setup docs live in:
 
 - `docs/operator-runbook.md`
 - `docs/strategy-contract.md`
+- `docs/progress-checklist.md`
 
 Primary local CLI entrypoints:
 
 - `python -m trading_infra backtest-run`
 - `python -m trading_infra paper-dry-run`
+- `python -m trading_infra market-data-upload`
 - `python -m trading_infra strategy-upload`
 - `python -m trading_infra registry-upload`
 - `python -m trading_infra backtest-upload`

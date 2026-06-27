@@ -42,6 +42,13 @@ class _FakeS3Client:
         self.downloaded_files.append((Bucket, Key, Filename))
         Path(Filename).write_bytes(self.objects[Key])
 
+    def delete_object(self, Bucket, Key):
+        self.objects.pop(Key, None)
+
+    def delete_objects(self, Bucket, Delete):
+        for item in Delete.get("Objects", []):
+            self.objects.pop(item["Key"], None)
+
     def get_paginator(self, _name):
         contents = [{"Key": key} for key in sorted(self.objects)]
         return _FakePaginator([{"Contents": contents}])
@@ -98,6 +105,9 @@ def test_r2_client_round_trip(monkeypatch, tmp_path) -> None:
 
     assert client.exists("models/demo/model.pkl")
     assert "models/demo/model.pkl" in client.list_keys("models/")
+
+    client.delete_key("models/demo/model.pkl")
+    assert not client.exists("models/demo/model.pkl")
 
 
 def test_storage_paths_match_readme_layout() -> None:

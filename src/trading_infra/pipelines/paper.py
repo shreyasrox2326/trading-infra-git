@@ -14,8 +14,9 @@ from trading_infra.storage.decisions import read_decisions_parquet, write_decisi
 from trading_infra.storage.paths import paper_decisions_key
 from trading_infra.storage.r2 import R2Client
 from trading_infra.storage.remote import (
+    download_paper_decisions,
     download_strategy_artifacts,
-    load_daily_stock_data_range_from_r2,
+    load_daily_stock_data_history_from_r2,
     load_strategy_registry_from_r2,
     upload_paper_decisions,
 )
@@ -101,10 +102,9 @@ def run_daily_paper_job_from_r2(
     """Run the daily paper workflow using R2-backed inputs."""
     registry = load_strategy_registry_from_r2(client)
     active_ids = active_strategy_ids(registry)
-    market_data = load_daily_stock_data_range_from_r2(
+    market_data = load_daily_stock_data_history_from_r2(
         client,
         exchange=exchange,
-        start_date=as_of_date,
         end_date=as_of_date,
     )
 
@@ -116,6 +116,10 @@ def run_daily_paper_job_from_r2(
 
         for strategy_id in active_ids:
             download_strategy_artifacts(client, strategy_id, workspace)
+            existing = download_paper_decisions(client, strategy_id)
+            if not existing.is_empty():
+                decisions_path = workspace / Path(paper_decisions_key(strategy_id))
+                write_decisions_parquet(decisions_path, existing)
 
         results = run_daily_paper_job(
             base_path=workspace,

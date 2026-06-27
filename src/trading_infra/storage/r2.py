@@ -74,6 +74,21 @@ class R2Client:
             handle.write(payload)
             return Path(handle.name)
 
+    def delete_key(self, key: str) -> None:
+        """Delete a single object key."""
+        self._client.delete_object(Bucket=self.config.bucket, Key=key)
+
+    def delete_keys(self, keys: list[str]) -> None:
+        """Delete multiple object keys."""
+        if not keys:
+            return
+        for start in range(0, len(keys), 1000):
+            batch = keys[start : start + 1000]
+            self._client.delete_objects(
+                Bucket=self.config.bucket,
+                Delete={"Objects": [{"Key": key} for key in batch]},
+            )
+
     def upload_text(self, key: str, text: str, *, encoding: str = "utf-8") -> None:
         """Upload a text object."""
         self.upload_bytes(key, text.encode(encoding), content_type="text/plain")
