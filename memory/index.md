@@ -20,10 +20,11 @@ This file is the navigation map for repo memory.
 - [Infrastructure ready implementation](logs/2026-06-27-infra-ready-implementation.md)
 - [Market data publishing](logs/2026-06-28-market-data-publishing.md)
 - [README gap audit](logs/2026-06-28-readme-gap-audit.md)
+- [Historical NSE R2 load](logs/2026-06-28-historical-nse-r2-load.md)
 
 ## Open Questions
 
-- How raw bhavcopies should be transformed into canonical `daily_stock_data` parquet inside the repo is still not decided in code.
+- Corporate-action-adjusted prices still need a source decision; current historical load uses identity adjustment.
 
 ## Active Plan Checklists
 

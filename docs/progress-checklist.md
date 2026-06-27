@@ -41,12 +41,13 @@ Target operating state from the README:
 
 - `DONE` Canonical market-data upload command exists: `python -m trading_infra market-data-upload`.
 - `DONE` Upload rewrites canonical `exchange/year/month/part.parquet` partitions and clears stale parquet objects.
-- `PARTIAL` The repo only supports uploading canonical parquet inputs.
+- `DONE` Historical NSE bhavcopy fetch and canonical ingestion commands exist.
 - `DONE` Raw NSE equity bhavcopy archives can be fetched into ignored local operator state.
 - `DONE` Raw NSE equity bhavcopies can be normalized into canonical parquet with identity adjustments.
+- `DONE` R2 contains verified NSE history: 5,786,247 rows, 126 monthly partitions, 2016-01-01 to 2026-06-25.
 - `PARTIAL` Delivery fields are nullable when the raw bhavcopy source does not include them.
 - `TODO` Corporate-action adjustment data is not integrated.
-- `BLOCKED` Full historical R2 coverage depends on local historical source data being present and uploaded.
+- `PARTIAL` The source adapter handles NSE historical and UDiFF bhavcopy files, but daily automated refresh is not wired into GitHub Actions yet.
 
 ### Phase 3: Local Strategy Development And Backtest
 
@@ -81,18 +82,12 @@ These are the active gaps between the documented target state and the current im
 2. ML strategy execution is missing.
    The README and strategy contract allow model artifacts, but runtime code only supports `top_n_adj_close`.
 
-3. Raw bhavcopy ingestion is missing.
-   The repo can upload canonical parquet to R2, but it does not ingest raw bhavcopies into the canonical `daily_stock_data` schema.
-
-4. Full historical R2 data is not yet guaranteed.
-   The upload path exists, but the real one-time historical load still depends on local historical source files being prepared and uploaded.
+3. Daily market-data refresh uses local/operator commands only.
+   Historical R2 data is loaded and verified, but GitHub Actions does not yet fetch the next bhavcopy, ingest it, and upload the updated market-data partition before paper decisions.
 
 ## Immediate Next Milestones
 
-1. Fetch full NSE historical bhavcopy archives into local ignored operator state.
-2. Ingest fetched bhavcopies into canonical `daily_stock_data` parquet.
-3. Load the full historical dataset into R2 with `market-data-upload`.
-4. Add an ML strategy execution type to `strategy_builder.py` and the runtime contract.
-5. Add GitHub Actions support for daily market-data refresh before paper execution.
-6. Add an end-to-end ML deployment test:
+1. Add GitHub Actions support for daily market-data refresh before paper execution.
+2. Add an ML strategy execution type to `strategy_builder.py` and the runtime contract.
+3. Add an end-to-end ML deployment test:
    local backtest -> upload strategy/model -> upload backtest decisions -> activate registry -> daily paper run.

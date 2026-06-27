@@ -46,27 +46,30 @@ Status syntax:
 
 ## Phase 5: Upload Canonical History To R2
 
-- [ ] Run `market-data-upload` for generated canonical parquet.
-- [ ] Verify available R2 month partitions.
-- [ ] Verify R2 row count.
-- [ ] Verify R2 min/max date.
-- [ ] Verify sample rows.
-- [ ] Do not upload backtest decisions until market-data coverage is confirmed.
+- [x] Generate canonical parquet from fetched bhavcopies.
+- [x] Confirm canonical parquet coverage: 5,786,247 rows from 2016-01-01 to 2026-06-25.
+- [x] Run one-partition `market-data-upload` smoke test for generated canonical parquet.
+- [x] Run full `market-data-upload` for generated canonical parquet.
+- [x] Verify available R2 month partitions: 126 NSE month partitions from 2016-01 to 2026-06.
+- [x] Verify R2 row count: 5,786,247 rows.
+- [x] Verify R2 min/max date: 2016-01-01 to 2026-06-25.
+- [x] Verify sample rows.
+- [x] Do not upload backtest decisions until market-data coverage is confirmed.
 
 ## Phase 6: Run Full Historical Backtest From R2
 
-- [ ] Run R2-backed `backtest-run` for confirmed historical range.
-- [ ] Validate backtest rows are non-zero.
-- [ ] Validate backtest date range.
-- [ ] Validate no duplicate decision keys.
-- [ ] Validate decision schema.
+- [x] Run R2-backed `backtest-run` for confirmed historical range.
+- [x] Validate backtest rows are non-zero: 12,930 rows.
+- [x] Validate backtest date range: 2016-01-01 to 2026-06-25.
+- [x] Validate no duplicate decision keys.
+- [x] Validate decision schema.
 
 ## Phase 7: Upload Backtest Decisions And Validate Paper Dry Run
 
-- [ ] Upload backtest decisions with `backtest-upload`.
-- [ ] Run R2-backed `paper-dry-run` for latest confirmed market date.
-- [ ] Inspect paper decision output.
-- [ ] Do not use `--upload-results` until paper output is inspected.
+- [x] Upload backtest decisions with `backtest-upload`.
+- [x] Run R2-backed `paper-dry-run` for latest confirmed market date: 2026-06-25.
+- [x] Inspect paper decision output: 5 rows for `top_n_adj_close_v1`.
+- [x] Do not use `--upload-results` until paper output is inspected.
 
 ## Phase 8: Commit Ingestion And Historical Setup Work
 
