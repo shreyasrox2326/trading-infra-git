@@ -25,6 +25,11 @@ def strategy_model_key(strategy_id: str, *, filename: str = "model.pkl") -> str:
     return str(PurePosixPath(strategy_prefix(strategy_id)) / filename)
 
 
+def strategy_feature_config_key(strategy_id: str) -> str:
+    """Return the canonical feature-config key for a strategy."""
+    return str(PurePosixPath(strategy_prefix(strategy_id)) / "feature_config.yaml")
+
+
 def registry_strategies_key() -> str:
     """Return the strategy registry object key."""
     return str(PurePosixPath("registry") / "strategies.parquet")
