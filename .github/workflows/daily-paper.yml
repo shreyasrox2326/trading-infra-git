@@ -21,8 +21,8 @@ jobs:
     env:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_S3_API: ${{ secrets.R2_S3_API }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
       EXCHANGE: ${{ inputs.exchange || 'NSE' }}
     steps:
       - name: Check out repository

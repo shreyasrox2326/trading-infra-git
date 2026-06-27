@@ -22,8 +22,8 @@ class R2Config:
         values = {
             "access_key_id": getenv("R2_ACCESS_KEY_ID"),
             "secret_access_key": getenv("R2_SECRET_ACCESS_KEY"),
-            "endpoint_url": getenv("R2_ENDPOINT_URL"),
-            "bucket": getenv("R2_BUCKET"),
+            "endpoint_url": getenv("R2_S3_API") or getenv("R2_ENDPOINT_URL"),
+            "bucket": getenv("R2_BUCKET_NAME") or getenv("R2_BUCKET"),
             "region_name": getenv("R2_REGION", "auto"),
         }
         missing = [key for key, value in values.items() if key != "region_name" and not value]

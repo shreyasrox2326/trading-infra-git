@@ -50,8 +50,8 @@ class _FakeS3Client:
 def test_r2_config_from_env(monkeypatch) -> None:
     monkeypatch.setenv("R2_ACCESS_KEY_ID", "key")
     monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "secret")
-    monkeypatch.setenv("R2_ENDPOINT_URL", "https://example.r2.cloudflarestorage.com")
-    monkeypatch.setenv("R2_BUCKET", "bucket-name")
+    monkeypatch.setenv("R2_S3_API", "https://example.r2.cloudflarestorage.com")
+    monkeypatch.setenv("R2_BUCKET_NAME", "bucket-name")
 
     config = R2Config.from_env()
 
@@ -60,7 +60,7 @@ def test_r2_config_from_env(monkeypatch) -> None:
 
 
 def test_r2_config_requires_env(monkeypatch) -> None:
-    for name in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT_URL", "R2_BUCKET"):
+    for name in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_S3_API", "R2_BUCKET_NAME"):
         monkeypatch.delenv(name, raising=False)
 
     with pytest.raises(ValueError, match="Missing required R2 environment variables"):
