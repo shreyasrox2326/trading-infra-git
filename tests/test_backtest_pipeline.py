@@ -3,7 +3,7 @@ from datetime import date
 import polars as pl
 
 from trading_infra.data.market_data import load_daily_stock_data
-from trading_infra.pipelines.backtest import run_backtest_for_date
+from trading_infra.pipelines.backtest import backtest_dates, run_backtest, run_backtest_for_date
 from trading_infra.strategies.top_n import TopNByAdjustedCloseStrategy
 
 
@@ -91,3 +91,204 @@ def test_backtest_pipeline_runs_end_to_end(tmp_path) -> None:
     assert decisions.get_column("symbol").to_list() == ["BBB", "AAA"]
     assert decisions.get_column("target_weight").to_list() == [0.5, 0.5]
     assert decisions.get_column("rank").to_list() == [1, 2]
+
+
+def test_backtest_dates_respects_window(tmp_path) -> None:
+    path = tmp_path / "market_dates.parquet"
+    pl.DataFrame(
+        [
+            {
+                "date": date(2026, 1, 1),
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "series": "EQ",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "prev_close": 99.0,
+                "vwap": 100.0,
+                "volume": 1000,
+                "turnover": 100_000.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 100.0,
+                "adj_high": 101.0,
+                "adj_low": 99.0,
+                "adj_close": 100.0,
+                "adj_factor": 1.0,
+            },
+            {
+                "date": date(2026, 1, 2),
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "series": "EQ",
+                "open": 101.0,
+                "high": 102.0,
+                "low": 100.0,
+                "close": 101.5,
+                "prev_close": 100.0,
+                "vwap": 101.2,
+                "volume": 1000,
+                "turnover": 101_200.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 101.0,
+                "adj_high": 102.0,
+                "adj_low": 100.0,
+                "adj_close": 101.5,
+                "adj_factor": 1.0,
+            },
+            {
+                "date": date(2026, 1, 3),
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "series": "EQ",
+                "open": 102.0,
+                "high": 103.0,
+                "low": 101.0,
+                "close": 102.5,
+                "prev_close": 101.5,
+                "vwap": 102.2,
+                "volume": 1000,
+                "turnover": 102_200.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 102.0,
+                "adj_high": 103.0,
+                "adj_low": 101.0,
+                "adj_close": 102.5,
+                "adj_factor": 1.0,
+            },
+        ]
+    ).write_parquet(path)
+
+    market_data = load_daily_stock_data(str(path))
+
+    scheduled = backtest_dates(
+        market_data,
+        start_date=date(2026, 1, 2),
+        end_date=date(2026, 1, 3),
+    )
+
+    assert scheduled == [date(2026, 1, 2), date(2026, 1, 3)]
+
+
+def test_run_backtest_replays_across_dates(tmp_path) -> None:
+    path = tmp_path / "market_replay.parquet"
+    pl.DataFrame(
+        [
+            {
+                "date": date(2026, 1, 1),
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "series": "EQ",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "prev_close": 99.0,
+                "vwap": 100.0,
+                "volume": 1000,
+                "turnover": 100_000.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 100.0,
+                "adj_high": 101.0,
+                "adj_low": 99.0,
+                "adj_close": 100.0,
+                "adj_factor": 1.0,
+            },
+            {
+                "date": date(2026, 1, 1),
+                "exchange": "NSE",
+                "isin": "INE000000002",
+                "symbol": "BBB",
+                "series": "EQ",
+                "open": 95.0,
+                "high": 96.0,
+                "low": 94.0,
+                "close": 95.0,
+                "prev_close": 94.0,
+                "vwap": 95.1,
+                "volume": 1000,
+                "turnover": 95_100.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 95.0,
+                "adj_high": 96.0,
+                "adj_low": 94.0,
+                "adj_close": 95.0,
+                "adj_factor": 1.0,
+            },
+            {
+                "date": date(2026, 1, 2),
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "series": "EQ",
+                "open": 101.0,
+                "high": 102.0,
+                "low": 100.0,
+                "close": 101.0,
+                "prev_close": 100.0,
+                "vwap": 101.0,
+                "volume": 1000,
+                "turnover": 101_000.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 101.0,
+                "adj_high": 102.0,
+                "adj_low": 100.0,
+                "adj_close": 101.0,
+                "adj_factor": 1.0,
+            },
+            {
+                "date": date(2026, 1, 2),
+                "exchange": "NSE",
+                "isin": "INE000000002",
+                "symbol": "BBB",
+                "series": "EQ",
+                "open": 103.0,
+                "high": 104.0,
+                "low": 102.0,
+                "close": 103.0,
+                "prev_close": 95.0,
+                "vwap": 103.0,
+                "volume": 1000,
+                "turnover": 103_000.0,
+                "trades": 100,
+                "deliverable_qty": 500,
+                "delivery_pct": 50.0,
+                "adj_open": 103.0,
+                "adj_high": 104.0,
+                "adj_low": 102.0,
+                "adj_close": 103.0,
+                "adj_factor": 1.0,
+            },
+        ]
+    ).write_parquet(path)
+
+    market_data = load_daily_stock_data(str(path))
+    strategy = TopNByAdjustedCloseStrategy(strategy_id="top_close_v1", top_n=1)
+
+    decisions = run_backtest(
+        strategy,
+        market_data,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 2),
+    )
+
+    assert decisions.get_column("date").to_list() == [date(2026, 1, 1), date(2026, 1, 2)]
+    assert decisions.get_column("symbol").to_list() == ["AAA", "BBB"]
+    assert decisions.get_column("target_weight").to_list() == [1.0, 1.0]
