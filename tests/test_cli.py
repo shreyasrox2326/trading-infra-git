@@ -1,10 +1,13 @@
 import json
 from datetime import date
+from pathlib import Path
 
 import polars as pl
 import pytest
 
 from trading_infra.cli import main
+from trading_infra.storage.config import R2Config
+from trading_infra.storage.r2 import R2Client
 
 
 def _market_data_frame() -> pl.DataFrame:
@@ -78,6 +81,67 @@ def _write_strategy_files(base_path) -> None:
     )
 
 
+class _FakePaginator:
+    def __init__(self, pages):
+        self._pages = pages
+
+    def paginate(self, **kwargs):
+        prefix = kwargs.get("Prefix", "")
+        return [
+            {"Contents": [item for item in page.get("Contents", []) if item["Key"].startswith(prefix)]}
+            for page in self._pages
+        ]
+
+
+class _FakeS3Client:
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def put_object(self, Bucket, Key, Body, **_kwargs):
+        self.objects[Key] = Body
+
+    def get_object(self, Bucket, Key):
+        from io import BytesIO
+
+        return {"Body": BytesIO(self.objects[Key])}
+
+    def upload_file(self, Filename, Bucket, Key):
+        self.objects[Key] = Path(Filename).read_bytes()
+
+    def download_file(self, Bucket, Key, Filename):
+        Path(Filename).parent.mkdir(parents=True, exist_ok=True)
+        Path(Filename).write_bytes(self.objects[Key])
+
+    def get_paginator(self, _name):
+        contents = [{"Key": key} for key in sorted(self.objects)]
+        return _FakePaginator([{"Contents": contents}])
+
+
+def _patch_r2(monkeypatch) -> _FakeS3Client:
+    fake_client = _FakeS3Client()
+
+    class _FakeSession:
+        def client(self, *_args, **_kwargs):
+            return fake_client
+
+    monkeypatch.setattr("boto3.session.Session", lambda: _FakeSession())
+    monkeypatch.setattr(
+        R2Client,
+        "from_env",
+        classmethod(
+            lambda cls: cls(
+                R2Config(
+                    access_key_id="key",
+                    secret_access_key="secret",
+                    endpoint_url="https://example.r2.cloudflarestorage.com",
+                    bucket="bucket-name",
+                )
+            )
+        ),
+    )
+    return fake_client
+
+
 def test_paper_dry_run_local(capsys, tmp_path) -> None:
     _write_strategy_files(tmp_path)
     market_path = tmp_path / "market.parquet"
@@ -97,7 +161,7 @@ def test_paper_dry_run_local(capsys, tmp_path) -> None:
 
     captured = capsys.readouterr().out
     assert exit_code == 0
-    assert "paper-dry-run date=2026-01-02 source=local strategies=1" in captured
+    assert "paper-dry-run date=2026-01-02 source=local active_strategies=1" in captured
     assert "momentum_v1 rows=1" in captured
 
 
@@ -145,3 +209,54 @@ def test_paper_dry_run_requires_market_data_without_r2(tmp_path) -> None:
 def test_paper_dry_run_requires_exchange_for_r2() -> None:
     with pytest.raises(ValueError, match="exchange"):
         main(["paper-dry-run", "--date", "2026-01-02", "--use-r2"])
+
+
+def test_strategy_upload(capsys, monkeypatch, tmp_path) -> None:
+    fake_client = _patch_r2(monkeypatch)
+    _write_strategy_files(tmp_path)
+
+    exit_code = main(["strategy-upload", "--base-path", str(tmp_path), "--strategy-id", "momentum_v1"])
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "strategy-upload strategy_id=momentum_v1" in captured
+    assert "strategies/momentum_v1/config.yaml" in fake_client.objects
+
+
+def test_registry_upload(capsys, monkeypatch, tmp_path) -> None:
+    fake_client = _patch_r2(monkeypatch)
+    registry_path = tmp_path / "registry.parquet"
+    pl.DataFrame([{"strategy_id": "momentum_v1", "version": "v1", "status": "active"}]).write_parquet(registry_path)
+
+    exit_code = main(["registry-upload", "--path", str(registry_path)])
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "registry-upload path=" in captured
+    assert "registry/strategies.parquet" in fake_client.objects
+
+
+def test_backtest_upload(capsys, monkeypatch, tmp_path) -> None:
+    fake_client = _patch_r2(monkeypatch)
+    decisions_path = tmp_path / "decisions.parquet"
+    pl.DataFrame(
+        [
+            {
+                "date": date(2026, 1, 2),
+                "strategy_id": "momentum_v1",
+                "exchange": "NSE",
+                "isin": "INE000000001",
+                "symbol": "AAA",
+                "target_weight": 1.0,
+                "rank": 1,
+                "score": 100.0,
+            }
+        ]
+    ).write_parquet(decisions_path)
+
+    exit_code = main(["backtest-upload", "--strategy-id", "momentum_v1", "--path", str(decisions_path)])
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "backtest-upload strategy_id=momentum_v1" in captured
+    assert "decisions/backtest/momentum_v1/decisions.parquet" in fake_client.objects

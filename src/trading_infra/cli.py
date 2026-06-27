@@ -11,6 +11,11 @@ from trading_infra.data.market_data import load_daily_stock_data
 from trading_infra.pipelines.backtest import run_backtest
 from trading_infra.pipelines.paper import run_daily_paper_job, run_daily_paper_job_from_r2
 from trading_infra.storage.decisions import write_decisions_parquet
+from trading_infra.storage.remote import (
+    upload_backtest_decisions,
+    upload_strategy_artifacts,
+    upload_strategy_registry,
+)
 from trading_infra.storage.r2 import R2Client
 from trading_infra.strategy_builder import build_strategy
 from trading_infra.strategy_store import load_stored_strategy
@@ -36,6 +41,17 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--end-date", required=True)
     backtest.add_argument("--output-path")
 
+    strategy_upload = subparsers.add_parser("strategy-upload", help="Upload local strategy artifacts to R2.")
+    strategy_upload.add_argument("--base-path", default=".")
+    strategy_upload.add_argument("--strategy-id", required=True)
+
+    registry_upload = subparsers.add_parser("registry-upload", help="Upload a local registry parquet file to R2.")
+    registry_upload.add_argument("--path", required=True)
+
+    backtest_upload = subparsers.add_parser("backtest-upload", help="Upload local backtest decisions to R2.")
+    backtest_upload.add_argument("--strategy-id", required=True)
+    backtest_upload.add_argument("--path", required=True)
+
     return parser
 
 
@@ -55,9 +71,12 @@ def paper_dry_run(args: argparse.Namespace) -> int:
             as_of_date=as_of_date,
             upload_results=args.upload_results,
         )
-        print(f"paper-dry-run date={args.date} source=r2 strategies={len(results)}")
+        print(
+            f"paper-dry-run date={args.date} source=r2 exchange={args.exchange} "
+            f"active_strategies={len(results)} uploaded={str(args.upload_results).lower()}"
+        )
         for strategy_id, frame in results.items():
-            print(f"{strategy_id} rows={frame.height} uploaded={str(args.upload_results).lower()}")
+            print(f"{strategy_id} rows={frame.height}")
         return 0
 
     if not args.market_data_path:
@@ -69,7 +88,7 @@ def paper_dry_run(args: argparse.Namespace) -> int:
         market_data=market_data,
         as_of_date=as_of_date,
     )
-    print(f"paper-dry-run date={args.date} source=local strategies={len(results)}")
+    print(f"paper-dry-run date={args.date} source=local active_strategies={len(results)}")
     for strategy_id, frame in results.items():
         output_path = Path(args.base_path) / "decisions" / "paper" / strategy_id / "decisions.parquet"
         print(f"{strategy_id} rows={frame.height} output={output_path.as_posix()}")
@@ -96,6 +115,33 @@ def backtest_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def strategy_upload(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    upload_strategy_artifacts(client, args.strategy_id, args.base_path)
+    print(f"strategy-upload strategy_id={args.strategy_id} source={Path(args.base_path).as_posix()}")
+    return 0
+
+
+def registry_upload(args: argparse.Namespace) -> int:
+    registry_path = Path(args.path)
+    if not registry_path.exists():
+        raise FileNotFoundError(f"Registry parquet not found: {registry_path}")
+    client = R2Client.from_env()
+    upload_strategy_registry(client, registry_path)
+    print(f"registry-upload path={registry_path.as_posix()}")
+    return 0
+
+
+def backtest_upload(args: argparse.Namespace) -> int:
+    decisions_path = Path(args.path)
+    if not decisions_path.exists():
+        raise FileNotFoundError(f"Backtest decisions file not found: {decisions_path}")
+    client = R2Client.from_env()
+    upload_backtest_decisions(client, args.strategy_id, decisions_path)
+    print(f"backtest-upload strategy_id={args.strategy_id} path={decisions_path.as_posix()}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -104,5 +150,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return paper_dry_run(args)
     if args.command == "backtest-run":
         return backtest_run(args)
+    if args.command == "strategy-upload":
+        return strategy_upload(args)
+    if args.command == "registry-upload":
+        return registry_upload(args)
+    if args.command == "backtest-upload":
+        return backtest_upload(args)
     parser.error(f"Unsupported command: {args.command}")
     return 2

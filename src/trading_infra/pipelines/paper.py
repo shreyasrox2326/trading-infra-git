@@ -15,7 +15,7 @@ from trading_infra.storage.paths import paper_decisions_key
 from trading_infra.storage.r2 import R2Client
 from trading_infra.storage.remote import (
     download_strategy_artifacts,
-    load_daily_stock_data_from_r2,
+    load_daily_stock_data_range_from_r2,
     load_strategy_registry_from_r2,
     upload_paper_decisions,
 )
@@ -101,12 +101,11 @@ def run_daily_paper_job_from_r2(
     """Run the daily paper workflow using R2-backed inputs."""
     registry = load_strategy_registry_from_r2(client)
     active_ids = active_strategy_ids(registry)
-    market_data = load_daily_stock_data_from_r2(
+    market_data = load_daily_stock_data_range_from_r2(
         client,
         exchange=exchange,
-        year=as_of_date.year,
-        month=as_of_date.month,
-        as_of_date=as_of_date,
+        start_date=as_of_date,
+        end_date=as_of_date,
     )
 
     with TemporaryDirectory() as tmpdir:
