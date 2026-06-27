@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 import polars as pl
+import pytest
 
 from trading_infra.data.market_data import load_daily_stock_data
 from trading_infra.pipelines.paper import append_paper_decisions, run_daily_paper_job
@@ -247,3 +248,33 @@ def test_run_daily_paper_job_skips_inactive_strategies(tmp_path) -> None:
     results = run_daily_paper_job(base_path=tmp_path, market_data=market_data, as_of_date=date(2026, 1, 2))
 
     assert list(results) == ["momentum_v1"]
+
+
+def test_run_daily_paper_job_fails_for_missing_registry(tmp_path) -> None:
+    market_path = tmp_path / "market.parquet"
+    _market_data_frame().write_parquet(market_path)
+    market_data = load_daily_stock_data(str(market_path), as_of_date=date(2026, 1, 2))
+
+    with pytest.raises(FileNotFoundError):
+        run_daily_paper_job(base_path=tmp_path, market_data=market_data, as_of_date=date(2026, 1, 2))
+
+
+def test_run_daily_paper_job_fails_for_missing_strategy_artifacts(tmp_path) -> None:
+    _write_registry(tmp_path, [{"strategy_id": "momentum_v1", "version": "v1", "status": "active"}])
+    market_path = tmp_path / "market.parquet"
+    _market_data_frame().write_parquet(market_path)
+    market_data = load_daily_stock_data(str(market_path), as_of_date=date(2026, 1, 2))
+
+    with pytest.raises(FileNotFoundError, match="Missing strategy config"):
+        run_daily_paper_job(base_path=tmp_path, market_data=market_data, as_of_date=date(2026, 1, 2))
+
+
+def test_run_daily_paper_job_fails_for_unsupported_strategy_type(tmp_path) -> None:
+    _write_registry(tmp_path, [{"strategy_id": "momentum_v1", "version": "v1", "status": "active"}])
+    _write_local_strategy(tmp_path, "momentum_v1", strategy_type="unsupported")
+    market_path = tmp_path / "market.parquet"
+    _market_data_frame().write_parquet(market_path)
+    market_data = load_daily_stock_data(str(market_path), as_of_date=date(2026, 1, 2))
+
+    with pytest.raises(ValueError, match="unsupported strategy_type"):
+        run_daily_paper_job(base_path=tmp_path, market_data=market_data, as_of_date=date(2026, 1, 2))
