@@ -93,6 +93,68 @@ def test_backtest_pipeline_runs_end_to_end(tmp_path) -> None:
     assert decisions.get_column("rank").to_list() == [1, 2]
 
 
+def test_top_n_strategy_ignores_non_eq_series_for_decision_keys(tmp_path) -> None:
+    path = tmp_path / "market_series.parquet"
+    rows = [
+        {
+            "date": date(2026, 1, 2),
+            "exchange": "NSE",
+            "isin": "INE000000001",
+            "symbol": "AAA",
+            "series": "EQ",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "prev_close": 99.0,
+            "vwap": 100.0,
+            "volume": 1000,
+            "turnover": 100_000.0,
+            "trades": 100,
+            "deliverable_qty": 500,
+            "delivery_pct": 50.0,
+            "adj_open": 100.0,
+            "adj_high": 101.0,
+            "adj_low": 99.0,
+            "adj_close": 100.0,
+            "adj_factor": 1.0,
+        },
+        {
+            "date": date(2026, 1, 2),
+            "exchange": "NSE",
+            "isin": "INE000000001",
+            "symbol": "AAA",
+            "series": "BL",
+            "open": 200.0,
+            "high": 201.0,
+            "low": 199.0,
+            "close": 200.0,
+            "prev_close": 199.0,
+            "vwap": 200.0,
+            "volume": 1000,
+            "turnover": 200_000.0,
+            "trades": 100,
+            "deliverable_qty": 500,
+            "delivery_pct": 50.0,
+            "adj_open": 200.0,
+            "adj_high": 201.0,
+            "adj_low": 199.0,
+            "adj_close": 200.0,
+            "adj_factor": 1.0,
+        },
+    ]
+    pl.DataFrame(rows).write_parquet(path)
+
+    market_data = load_daily_stock_data(str(path), as_of_date=date(2026, 1, 2))
+    strategy = TopNByAdjustedCloseStrategy(strategy_id="top_close_v1", top_n=2)
+
+    decisions = run_backtest_for_date(strategy, market_data, date(2026, 1, 2))
+
+    assert decisions.height == 1
+    assert decisions.get_column("symbol").to_list() == ["AAA"]
+    assert decisions.get_column("score").to_list() == [100.0]
+
+
 def test_backtest_dates_respects_window(tmp_path) -> None:
     path = tmp_path / "market_dates.parquet"
     pl.DataFrame(

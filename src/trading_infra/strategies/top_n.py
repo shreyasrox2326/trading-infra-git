@@ -20,7 +20,9 @@ class TopNByAdjustedCloseStrategy:
     def run(self, context: StrategyContext) -> pl.DataFrame:
         current_day = (
             context.market_data.filter(pl.col("date") == context.as_of_date)
+            .filter(pl.col("series") == "EQ")
             .sort(["adj_close", "symbol"], descending=[True, False])
+            .unique(subset=["date", "exchange", "isin", "symbol"], keep="first", maintain_order=True)
             .head(self.top_n)
         )
         if current_day.is_empty():
