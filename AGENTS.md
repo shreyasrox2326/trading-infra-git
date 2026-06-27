@@ -30,6 +30,12 @@ name = infallible_turing
 id   = ee7d490cbe5e
 ```
 
+## Execution Rule
+
+- Run project commands only inside the container `infallible_turing` (`ee7d490cbe5e`).
+- Use the container workspace path `/workspaces/code/trading-infra-git` for repo operations.
+- Do not run project build, test, or tooling commands on the host machine unless the user explicitly asks for host execution.
+
 ## Core Context
 
 Cloudflare R2 is the private source of truth for persistent data, strategy files, model files, registries, and decision logs.
