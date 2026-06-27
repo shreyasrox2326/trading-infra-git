@@ -78,7 +78,7 @@ Status syntax:
 - [x] Commit bhavcopy pipeline tests.
 - [x] Commit historical setup docs.
 - [x] Run final `pytest -q`.
-- [ ] Confirm final git status.
+- [x] Confirm final git status.
 
 ## Stop Conditions
 
