@@ -1,0 +1,3 @@
+strategy_type: top_n_adj_close
+strategy_id: top_n_adj_close_v1
+top_n: 5

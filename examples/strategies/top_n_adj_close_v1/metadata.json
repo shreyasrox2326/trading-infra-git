@@ -1,0 +1,7 @@
+{
+  "strategy_name": "Top N Adjusted Close",
+  "strategy_type": "top_n_adj_close",
+  "version": "v1",
+  "status": "draft",
+  "notes": "Example strategy artifact folder for local development and R2 publishing."
+}
