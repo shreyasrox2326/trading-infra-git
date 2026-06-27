@@ -19,6 +19,7 @@ from trading_infra.storage.remote import (
     load_daily_stock_data_from_r2,
     load_strategy_registry_from_r2,
     upload_backtest_decisions,
+    upload_paper_decisions,
 )
 from trading_infra.storage.r2 import R2Client
 
@@ -40,5 +41,6 @@ __all__ = [
     "strategy_metadata_key",
     "strategy_model_key",
     "upload_backtest_decisions",
+    "upload_paper_decisions",
     "write_decisions_parquet",
 ]

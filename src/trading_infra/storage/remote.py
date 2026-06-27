@@ -90,6 +90,11 @@ def upload_backtest_decisions(client: R2Client, strategy_id: str, local_path: st
     client.upload_file(local_path, backtest_decisions_key(strategy_id))
 
 
+def upload_paper_decisions(client: R2Client, strategy_id: str, local_path: str | Path) -> None:
+    """Upload a local paper decisions parquet file to R2."""
+    client.upload_file(local_path, paper_decisions_key(strategy_id))
+
+
 def download_paper_decisions(client: R2Client, strategy_id: str) -> pl.DataFrame:
     """Download paper decisions for a strategy if they exist."""
     key = paper_decisions_key(strategy_id)
