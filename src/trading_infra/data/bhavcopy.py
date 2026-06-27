@@ -15,6 +15,8 @@ import polars as pl
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, DAILY_STOCK_DATA_SCHEMA
 
 NSE_ARCHIVE_BASE_URL = "https://archives.nseindia.com/content/historical/EQUITIES"
+NSE_UDIFF_BASE_URL = "https://archives.nseindia.com/content/cm"
+NSE_UDIFF_START_DATE = date(2024, 7, 8)
 NSE_MONTHS = {
     1: "JAN",
     2: "FEB",
@@ -29,6 +31,7 @@ NSE_MONTHS = {
     11: "NOV",
     12: "DEC",
 }
+NSE_MONTH_NUMBERS = {month: f"{number:02d}" for number, month in NSE_MONTHS.items()}
 
 
 @dataclass(frozen=True)
@@ -56,12 +59,17 @@ class BhavcopyIngestSummary:
 
 def bhavcopy_archive_name(trade_date: date) -> str:
     """Return the canonical NSE equity bhavcopy archive filename."""
+    if trade_date >= NSE_UDIFF_START_DATE:
+        return f"BhavCopy_NSE_CM_0_0_0_{trade_date:%Y%m%d}_F_0000.csv.zip"
     month = NSE_MONTHS[trade_date.month]
     return f"cm{trade_date:%d}{month}{trade_date:%Y}bhav.csv.zip"
 
 
 def bhavcopy_archive_url(trade_date: date) -> str:
     """Return the canonical NSE historical bhavcopy archive URL."""
+    if trade_date >= NSE_UDIFF_START_DATE:
+        filename = bhavcopy_archive_name(trade_date)
+        return f"{NSE_UDIFF_BASE_URL}/{filename}"
     month = NSE_MONTHS[trade_date.month]
     filename = bhavcopy_archive_name(trade_date)
     return f"{NSE_ARCHIVE_BASE_URL}/{trade_date:%Y}/{month}/{filename}"
@@ -170,35 +178,57 @@ def _column_expr(frame: pl.DataFrame, *names: str, default: pl.Expr | None = Non
     raise ValueError(f"Bhavcopy input is missing required column; tried: {names}")
 
 
+def _parse_bhavcopy_date(expr: pl.Expr) -> pl.Expr:
+    """Parse NSE bhavcopy date strings with two- or four-digit years."""
+    text = expr.cast(pl.Utf8)
+    iso_date = text.str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+    day = text.str.slice(0, 2)
+    month = text.str.slice(3, 3).str.to_uppercase().replace(NSE_MONTH_NUMBERS)
+    raw_year = text.str.slice(7)
+    year = pl.when(raw_year.str.len_chars() == 2).then(pl.lit("20") + raw_year).otherwise(raw_year)
+    legacy_date = (year + pl.lit("-") + month + pl.lit("-") + day).str.strptime(
+        pl.Date, "%Y-%m-%d", strict=False
+    )
+    return pl.coalesce(iso_date, legacy_date)
+
+
 def normalize_bhavcopy_inputs(input_path: str | Path, *, exchange: str) -> pl.DataFrame:
     """Normalize raw NSE bhavcopy files into canonical daily stock data."""
     frames = [_read_bhavcopy_file(path) for path in _resolve_bhavcopy_inputs(input_path)]
     normalized_frames: list[pl.DataFrame] = []
 
     for frame in frames:
-        timestamp = _column_expr(frame, "TIMESTAMP", "DATE", "TRADEDATE")
-        open_price = _column_expr(frame, "OPEN")
-        high = _column_expr(frame, "HIGH")
-        low = _column_expr(frame, "LOW")
-        close = _column_expr(frame, "CLOSE")
-        volume = _column_expr(frame, "TOTTRDQTY", "TTL_TRD_QNTY", "VOLUME")
-        turnover = _column_expr(frame, "TOTTRDVAL", "TURNOVER")
+        timestamp = _column_expr(frame, "TIMESTAMP", "DATE", "TRADEDATE", "TRADDT", "BIZDT")
+        open_price = _column_expr(frame, "OPEN", "OPNPRIC")
+        high = _column_expr(frame, "HIGH", "HGHPRIC")
+        low = _column_expr(frame, "LOW", "LWPRIC")
+        close = _column_expr(frame, "CLOSE", "CLSPRIC")
+        volume = _column_expr(frame, "TOTTRDQTY", "TTL_TRD_QNTY", "VOLUME", "TTLTRADGVOL")
+        turnover = _column_expr(frame, "TOTTRDVAL", "TURNOVER", "TTLTRFVAL")
 
         normalized = frame.select(
-            timestamp.cast(pl.Utf8).str.strptime(pl.Date, "%d-%b-%Y", strict=False).alias("date"),
+            _parse_bhavcopy_date(timestamp).alias("date"),
             pl.lit(exchange).alias("exchange"),
             _column_expr(frame, "ISIN").cast(pl.Utf8).alias("isin"),
-            _column_expr(frame, "SYMBOL").cast(pl.Utf8).alias("symbol"),
-            _column_expr(frame, "SERIES", default=pl.lit("EQ")).cast(pl.Utf8).alias("series"),
+            _column_expr(frame, "SYMBOL", "TCKRSYMB").cast(pl.Utf8).alias("symbol"),
+            _column_expr(frame, "SERIES", "SCTYSRS", default=pl.lit("EQ")).cast(pl.Utf8).alias("series"),
             open_price.cast(pl.Float64).alias("open"),
             high.cast(pl.Float64).alias("high"),
             low.cast(pl.Float64).alias("low"),
             close.cast(pl.Float64).alias("close"),
-            _column_expr(frame, "PREVCLOSE", "PREV_CLOSE").cast(pl.Float64).alias("prev_close"),
+            _column_expr(frame, "PREVCLOSE", "PREV_CLOSE", "PRVSCLSGPRIC").cast(pl.Float64).alias("prev_close"),
             (turnover.cast(pl.Float64) / volume.cast(pl.Float64)).alias("vwap"),
             volume.cast(pl.Int64).alias("volume"),
             turnover.cast(pl.Float64).alias("turnover"),
-            _column_expr(frame, "TOTALTRADES", "TRADES", default=pl.lit(None)).cast(pl.Int64).alias("trades"),
+            _column_expr(
+                frame,
+                "TOTALTRADES",
+                "TRADES",
+                "TTLNBOFTXSEXCTD",
+                default=pl.lit(None),
+            )
+            .cast(pl.Int64)
+            .alias("trades"),
             _column_expr(frame, "DELIV_QTY", "DELIVERABLEQTY", default=pl.lit(None)).cast(pl.Int64).alias("deliverable_qty"),
             _column_expr(frame, "DELIV_PER", "DELIVERYPCT", default=pl.lit(None)).cast(pl.Float64).alias("delivery_pct"),
             open_price.cast(pl.Float64).alias("adj_open"),
@@ -211,7 +241,7 @@ def normalize_bhavcopy_inputs(input_path: str | Path, *, exchange: str) -> pl.Da
 
     combined = pl.concat(normalized_frames).select(
         [pl.col(column).cast(DAILY_STOCK_DATA_SCHEMA[column]) for column in DAILY_STOCK_DATA_COLUMNS]
-    )
+    ).unique(maintain_order=True)
     return validate_canonical_bhavcopy_frame(combined)
 
 

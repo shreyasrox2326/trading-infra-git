@@ -8,6 +8,7 @@ import pytest
 
 from trading_infra.data.bhavcopy import (
     bhavcopy_archive_name,
+    bhavcopy_archive_url,
     fetch_bhavcopy_archive,
     normalize_bhavcopy_inputs,
     trading_weekdays,
@@ -45,10 +46,45 @@ def _row(symbol: str = "ABC", isin: str = "INE000000001") -> dict:
     }
 
 
+def _udiff_row(symbol: str = "ABC", isin: str = "INE000000001") -> dict:
+    return {
+        "TradDt": "2024-07-09",
+        "BizDt": "2024-07-09",
+        "Sgmt": "CM",
+        "Src": "NSE",
+        "FinInstrmTp": "STK",
+        "FinInstrmId": 1,
+        "ISIN": isin,
+        "TckrSymb": symbol,
+        "SctySrs": "EQ",
+        "FinInstrmNm": "ABC LIMITED",
+        "OpnPric": 100.0,
+        "HghPric": 101.0,
+        "LwPric": 99.0,
+        "ClsPric": 100.5,
+        "LastPric": 100.5,
+        "PrvsClsgPric": 98.0,
+        "SttlmPric": 100.5,
+        "TtlTradgVol": 1000,
+        "TtlTrfVal": 100500.0,
+        "TtlNbOfTxsExctd": 100,
+        "SsnId": "F1",
+        "NewBrdLotQty": 1,
+    }
+
+
 def test_trading_weekdays_skips_weekends() -> None:
     days = trading_weekdays(date(2026, 1, 2), date(2026, 1, 5))
 
     assert days == [date(2026, 1, 2), date(2026, 1, 5)]
+
+
+def test_bhavcopy_archive_name_switches_to_udiff_from_2024_07_08() -> None:
+    assert bhavcopy_archive_name(date(2024, 7, 5)) == "cm05JUL2024bhav.csv.zip"
+    assert bhavcopy_archive_name(date(2024, 7, 8)) == "BhavCopy_NSE_CM_0_0_0_20240708_F_0000.csv.zip"
+    assert bhavcopy_archive_url(date(2024, 7, 8)).endswith(
+        "/content/cm/BhavCopy_NSE_CM_0_0_0_20240708_F_0000.csv.zip"
+    )
 
 
 def test_fetch_bhavcopy_archive_without_network(monkeypatch, tmp_path) -> None:
@@ -85,9 +121,45 @@ def test_normalize_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
     assert frame.get_column("deliverable_qty").null_count() == 1
 
 
-def test_normalize_bhavcopy_inputs_rejects_duplicate_keys(tmp_path) -> None:
+def test_normalize_udiff_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
+    source = tmp_path / "BhavCopy_NSE_CM_0_0_0_20240709_F_0000.csv.zip"
+    _write_bhavcopy_zip(source, [_udiff_row()])
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="NSE")
+
+    assert frame.columns == list(DAILY_STOCK_DATA_COLUMNS)
+    assert frame.get_column("date").to_list() == [date(2024, 7, 9)]
+    assert frame.get_column("symbol").to_list() == ["ABC"]
+    assert frame.get_column("series").to_list() == ["EQ"]
+    assert frame.get_column("vwap").to_list() == [100.5]
+    assert frame.get_column("trades").to_list() == [100]
+
+
+def test_normalize_bhavcopy_inputs_handles_two_digit_years(tmp_path) -> None:
+    source = tmp_path / "cm13JUL2020bhav.csv.zip"
+    row = _row()
+    row["TIMESTAMP"] = "13-JUL-20"
+    _write_bhavcopy_zip(source, [row])
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="NSE")
+
+    assert frame.get_column("date").to_list() == [date(2020, 7, 13)]
+
+
+def test_normalize_bhavcopy_inputs_deduplicates_identical_rows(tmp_path) -> None:
     source = tmp_path / "cm02JAN2026bhav.csv.zip"
     _write_bhavcopy_zip(source, [_row(), _row()])
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="NSE")
+
+    assert frame.height == 1
+
+
+def test_normalize_bhavcopy_inputs_rejects_conflicting_duplicate_keys(tmp_path) -> None:
+    source = tmp_path / "cm02JAN2026bhav.csv.zip"
+    duplicate = _row()
+    duplicate["CLOSE"] = 101.0
+    _write_bhavcopy_zip(source, [_row(), duplicate])
 
     with pytest.raises(ValueError, match="duplicate"):
         normalize_bhavcopy_inputs(tmp_path, exchange="NSE")
