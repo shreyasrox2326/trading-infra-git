@@ -141,6 +141,26 @@ def test_upload_verified_history_stages_then_promotes(monkeypatch, tmp_path) -> 
     assert fake.uploaded_keys[0].startswith("_staging/history-load/test-run/")
 
 
+def test_upload_verified_history_accepts_partition_directory(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    partition_dir = tmp_path / "history" / "exchange=NSE" / "year=2026" / "month=01"
+    partition_dir.mkdir(parents=True)
+    audit_path = tmp_path / "audit.json"
+    _history_frame().write_parquet(partition_dir / "part.parquet")
+    audit_path.write_text(json.dumps({"passed": True}), encoding="utf-8")
+
+    results = upload_verified_history(
+        client,
+        path=tmp_path / "history",
+        audit_path=audit_path,
+        exchanges=["NSE"],
+        run_id="test-run",
+    )
+
+    assert len(results) == 1
+    assert "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet" in client._client.objects  # type: ignore[attr-defined]
+
+
 def test_upload_verified_history_does_not_promote_on_staging_failure(monkeypatch, tmp_path) -> None:
     client = _fake_client(monkeypatch)
     history_path = tmp_path / "history.parquet"

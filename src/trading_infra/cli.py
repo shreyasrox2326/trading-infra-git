@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import Sequence
 
 from trading_infra.data.bhavcopy import fetch_bhavcopy_archives, write_canonical_bhavcopy_parquet
-from trading_infra.data.history import build_history_parquet, summarize_history_frame
+from trading_infra.data.history import build_history_parquet, build_history_partitions
 from trading_infra.data.history import write_history_audit
 from trading_infra.data.market_data import load_daily_stock_data
 from trading_infra.pipelines.backtest import run_backtest
@@ -116,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     history_build.add_argument("--output-path", required=True)
     history_build.add_argument("--exchange", action="append")
     history_build.add_argument("--workers", type=int, default=4)
+    history_build.add_argument("--log-path")
     history_build.add_argument("--progress", action="store_true", default=True)
     history_build.add_argument("--no-progress", dest="progress", action="store_false")
 
@@ -378,18 +379,19 @@ def history_fetch(args: argparse.Namespace) -> int:
 
 
 def history_build(args: argparse.Namespace) -> int:
-    output_path, frame = build_history_parquet(
+    result = build_history_partitions(
         input_path=args.input_path,
         output_path=args.output_path,
         exchanges=args.exchange,
         workers=args.workers,
         show_progress=args.progress,
+        log_path=args.log_path,
     )
-    summary = summarize_history_frame(frame)
     print(
-        f"history-build input_path={args.input_path} output_path={output_path.as_posix()} "
-        f"rows={summary['rows']} date_min={summary['date_min']} date_max={summary['date_max']} "
-        f"exchanges={summary['exchanges']} symbols={summary['symbols']} workers={args.workers}"
+        f"history-build input_path={args.input_path} output_path={result.output_path.as_posix()} "
+        f"rows={result.rows} partitions={result.partitions} exchanges={result.exchanges} "
+        f"skipped_non_bhavcopy={result.skipped_non_bhavcopy} workers={args.workers} "
+        f"log={result.log_path.as_posix()}"
     )
     return 0
 

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import polars as pl
 
+from trading_infra.data.history import resolve_history_parquet_files
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
 from trading_infra.storage.market_data import MarketDataPartition, list_market_data_partitions
 from trading_infra.storage.paths import daily_stock_data_prefix
@@ -75,7 +76,7 @@ def upload_verified_history(
     """Upload verified canonical history through staging before canonical promotion."""
     _load_passing_audit(audit_path)
     selected_exchanges = [exchange.upper() for exchange in exchanges] if exchanges else None
-    frame = pl.read_parquet(path)
+    frame = pl.read_parquet(resolve_history_parquet_files(path))
     if selected_exchanges:
         frame = frame.filter(pl.col("exchange").is_in(selected_exchanges))
     if frame.is_empty():

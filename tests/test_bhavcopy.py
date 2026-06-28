@@ -99,6 +99,19 @@ def _bse_udiff_row() -> dict:
     return row
 
 
+def _bse_udiff_duplicate_variant_rows() -> list[dict]:
+    plain = _bse_udiff_row()
+    plain["TradDt"] = "2025-01-20"
+    plain["TckrSymb"] = "ASHOKLEY"
+    plain["ISIN"] = "INE208A01029"
+    plain["SctySrs"] = "A"
+    variant = dict(plain)
+    variant["TckrSymb"] = "ASHOKLEY#"
+    variant["TtlTradgVol"] = 1
+    variant["TtlTrfVal"] = 208.0
+    return [variant, plain]
+
+
 def test_trading_weekdays_skips_weekends() -> None:
     days = trading_weekdays(date(2026, 1, 2), date(2026, 1, 5))
 
@@ -139,6 +152,26 @@ def test_fetch_bhavcopy_archive_without_network(monkeypatch, tmp_path) -> None:
     assert result.status == "downloaded"
     assert result.path == tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
     assert result.path.read_bytes() == b"payload"
+
+
+def test_fetch_bhavcopy_archive_treats_html_response_as_not_available(monkeypatch, tmp_path) -> None:
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"<!DOCTYPE html><html><head></head><body>holiday</body></html>"
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", lambda *_args, **_kwargs: _Response())
+
+    result = fetch_bhavcopy_archive(date(2026, 1, 2), output_path=tmp_path)
+
+    assert result.status == "not_available"
+    assert result.path is None
+    assert not (tmp_path / bhavcopy_archive_name(date(2026, 1, 2))).exists()
 
 
 def test_fetch_bhavcopy_archives_parallel_preserves_date_order(monkeypatch, tmp_path) -> None:
@@ -216,6 +249,27 @@ def test_normalize_bse_legacy_bhavcopy_inputs_to_canonical_schema(tmp_path) -> N
     assert frame.get_column("adj_factor").to_list() == [1.0]
 
 
+def test_normalize_bse_legacy_bhavcopy_infers_date_from_filename(tmp_path) -> None:
+    source = tmp_path / "EQ010108_CSV.ZIP"
+    _write_bhavcopy_zip(source, [_bse_legacy_row()])
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+    assert frame.get_column("date").to_list() == [date(2008, 1, 1)]
+
+
+def test_normalize_bse_legacy_bhavcopy_ignores_blank_rows(tmp_path) -> None:
+    source = tmp_path / "EQ040422_CSV.ZIP"
+    csv_text = _bhavcopy_csv([_bse_legacy_row()]) + "\n\n"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("EQ040422.CSV", csv_text)
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+    assert frame.height == 1
+    assert frame.get_column("date").to_list() == [date(2022, 4, 4)]
+
+
 def test_normalize_bhavcopy_inputs_truncates_ragged_csv_lines(tmp_path) -> None:
     source = tmp_path / "EQ020126_CSV.ZIP"
     header = "SC_CODE,SC_NAME,SC_GROUP,OPEN,HIGH,LOW,CLOSE,PREVCLOSE,NO_TRADES,NO_OF_SHRS,NET_TURNOV,DATE\n"
@@ -237,8 +291,19 @@ def test_normalize_bhavcopy_inputs_rejects_short_ragged_market_rows(tmp_path) ->
     with ZipFile(source, "w") as archive:
         archive.writestr("EQ030126.CSV", header + row + short_row)
 
-    with pytest.raises(ValueError, match="incomplete market rows"):
+    with pytest.raises(ValueError, match="incomplete market row"):
         normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+
+def test_normalize_bse_udiff_drops_hash_variant_when_plain_symbol_exists(tmp_path) -> None:
+    source = tmp_path / "BhavCopy_BSE_CM_0_0_0_20250120_F_0000.CSV"
+    source.write_text(_bhavcopy_csv(_bse_udiff_duplicate_variant_rows()), encoding="utf-8")
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+    assert frame.height == 1
+    assert frame.get_column("symbol").to_list() == ["ASHOKLEY"]
+    assert frame.get_column("volume").to_list() == [1000]
 
 
 def test_normalize_bse_udiff_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:

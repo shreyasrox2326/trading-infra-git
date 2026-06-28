@@ -26,6 +26,7 @@ This file is the navigation map for repo memory.
 - [History build optimization](logs/2026-06-28-history-build-optimization.md)
 - [BSE ragged CSV fix](logs/2026-06-28-bse-ragged-csv-fix.md)
 - [Strict bhavcopy row quality](logs/2026-06-28-strict-bhavcopy-row-quality.md)
+- [Partition-first history build](logs/2026-06-28-partition-first-history-build.md)
 
 ## Open Questions
 

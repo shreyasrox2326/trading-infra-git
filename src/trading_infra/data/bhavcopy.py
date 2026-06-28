@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -61,6 +62,10 @@ class BhavcopyIngestSummary:
     symbols: int
     missing_deliverable_qty: int
     missing_delivery_pct: int
+
+
+class NonBhavcopyFileError(ValueError):
+    """Raised when a fetched file is an HTML/error page instead of bhavcopy data."""
 
 
 def _normalize_exchange(exchange: str) -> str:
@@ -144,6 +149,8 @@ def fetch_bhavcopy_archive(
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
                 payload = response.read()
+            if _looks_like_html(payload):
+                return BhavcopyFetchResult(trade_date, "not_available", None, "HTML response instead of bhavcopy data.")
             target.write_bytes(payload)
             return BhavcopyFetchResult(trade_date, "downloaded", target)
         except HTTPError as exc:
@@ -218,7 +225,20 @@ def _resolve_bhavcopy_inputs(input_path: str | Path) -> list[Path]:
     return files
 
 
+def _looks_like_html(payload: bytes) -> bool:
+    stripped = payload.lstrip()[:64].lower()
+    return stripped.startswith(b"<!doctype html") or stripped.startswith(b"<html")
+
+
 def _read_csv_payload(payload: BytesIO | Path) -> pl.DataFrame:
+    if isinstance(payload, Path):
+        head = payload.read_bytes()[:256]
+        if _looks_like_html(head):
+            raise NonBhavcopyFileError("HTML response instead of bhavcopy CSV.")
+    else:
+        if _looks_like_html(payload.getvalue()[:256]):
+            raise NonBhavcopyFileError("HTML response instead of bhavcopy CSV.")
+
     try:
         return pl.read_csv(payload, ignore_errors=False, truncate_ragged_lines=True)
     except pl.exceptions.ComputeError:
@@ -242,6 +262,8 @@ def _read_csv_payload(payload: BytesIO | Path) -> pl.DataFrame:
 
 def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
     if path.suffix.lower() == ".zip":
+        if _looks_like_html(path.read_bytes()[:256]):
+            raise NonBhavcopyFileError("HTML response instead of bhavcopy ZIP.")
         with ZipFile(path) as archive:
             csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
             if not csv_names:
@@ -251,12 +273,30 @@ def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
     else:
         frame = _read_csv_payload(path)
 
-    return frame.rename(
+    normalized = frame.rename(
         {
             column: column.strip().upper().replace(" ", "").replace("_", "")
             for column in frame.columns
         }
     )
+    if normalized.columns:
+        normalized = normalized.filter(
+            pl.any_horizontal([pl.col(column).is_not_null() for column in normalized.columns])
+        )
+
+    if not any(column in normalized.columns for column in ("TIMESTAMP", "DATE", "TRADEDATE", "TRADDT", "BIZDT")):
+        inferred_date = _infer_bhavcopy_date_from_filename(path)
+        if inferred_date is not None:
+            normalized = normalized.with_columns(pl.lit(inferred_date.isoformat()).alias("DATE"))
+    return normalized
+
+
+def _infer_bhavcopy_date_from_filename(path: Path) -> date | None:
+    match = re.search(r"EQ(\d{2})(\d{2})(\d{2})", path.name.upper())
+    if not match:
+        return None
+    day, month, year = match.groups()
+    return date(2000 + int(year), int(month), int(day))
 
 
 def _column_expr(frame: pl.DataFrame, *names: str, default: pl.Expr | None = None) -> pl.Expr:
@@ -339,27 +379,45 @@ def normalize_bhavcopy_frame(frame: pl.DataFrame, *, exchange: str) -> pl.DataFr
         close.cast(pl.Float64).alias("adj_close"),
         pl.lit(1.0).alias("adj_factor"),
     )
-    return normalized.filter(
+    required_complete = (
         pl.col("date").is_not_null()
         & pl.col("isin").is_not_null()
         & pl.col("symbol").is_not_null()
         & pl.col("close").is_not_null()
         & pl.col("volume").is_not_null()
     )
+    incomplete_count = normalized.filter(~required_complete).height
+    if incomplete_count:
+        raise ValueError(f"{incomplete_count} incomplete market row(s) in bhavcopy source.")
+    normalized = normalized.filter(required_complete)
+    if exchange == "BSE":
+        key_columns = ["date", "exchange", "isin", "series"]
+        plain_keys = (
+            normalized.filter(~pl.col("symbol").str.ends_with("#"))
+            .select(key_columns)
+            .unique()
+            .with_columns(pl.lit(True).alias("_has_plain_symbol"))
+        )
+        normalized = (
+            normalized.join(plain_keys, on=key_columns, how="left")
+            .filter(
+                ~(
+                    pl.col("symbol").str.ends_with("#")
+                    & pl.col("_has_plain_symbol").fill_null(False)
+                )
+            )
+            .drop("_has_plain_symbol")
+        )
+    return normalized
 
 
 def normalize_bhavcopy_file(path: str | Path, *, exchange: str) -> pl.DataFrame:
     """Normalize one raw exchange bhavcopy file into canonical daily stock data."""
     source = Path(path)
     try:
-        raw = _read_bhavcopy_file(source)
-        normalized = normalize_bhavcopy_frame(raw, exchange=exchange)
-        if normalized.height != raw.height:
-            raise ValueError(
-                f"normalized row count {normalized.height} differs from raw row count {raw.height}; "
-                "source contains incomplete market rows"
-            )
-        return normalized
+        return normalize_bhavcopy_frame(_read_bhavcopy_file(source), exchange=exchange)
+    except NonBhavcopyFileError:
+        raise
     except Exception as exc:
         raise ValueError(f"Failed to normalize bhavcopy file {source}: {exc}") from exc
 

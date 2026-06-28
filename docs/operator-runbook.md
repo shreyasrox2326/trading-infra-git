@@ -57,11 +57,24 @@ Build one canonical parquet locally:
 ```bash
 python -m trading_infra history-build \
   --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
-  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet \
-  --workers 4
+  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
+  --workers 4 \
+  --log-path /workspaces/code/trading-infra-git/data/import/history-build.log
 ```
 
-`history-build` shows progress by default. Use `--no-progress` only for non-interactive logging.
+`history-build` writes monthly local partitions shaped like R2:
+
+```text
+data/import/daily_stock_data_full/
+  exchange=NSE/year=YYYY/month=MM/part.parquet
+  exchange=BSE/year=YYYY/month=MM/part.parquet
+```
+
+It shows progress by default and writes timestamped phase logs. Monitor a long run with:
+
+```bash
+tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-build.log
+```
 
 Current ingestion uses identity adjustment:
 
@@ -81,7 +94,7 @@ Verify before any R2 historical replacement:
 
 ```bash
 python -m trading_infra history-verify \
-  --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet \
+  --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
   --report-path /workspaces/code/trading-infra-git/data/import/history_audit.json
 ```
 
@@ -103,7 +116,7 @@ Upload only after local verification passes:
 
 ```bash
 python -m trading_infra history-upload \
-  --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet \
+  --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
   --audit-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
   --exchange NSE \
   --exchange BSE

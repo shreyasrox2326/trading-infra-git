@@ -58,8 +58,53 @@ def test_build_history_parquet_combines_exchange_subdirectories(tmp_path) -> Non
     output, frame = build_history_parquet(input_path=raw, output_path=tmp_path / "daily_stock_data_full.parquet")
 
     assert output.exists()
+    assert output == tmp_path / "daily_stock_data_full"
+    assert (output / "exchange=NSE" / "year=2026" / "month=01" / "part.parquet").exists()
+    assert (output / "exchange=BSE" / "year=2026" / "month=01" / "part.parquet").exists()
     assert frame.columns == list(DAILY_STOCK_DATA_COLUMNS)
     assert frame.get_column("exchange").to_list() == ["BSE", "NSE"]
+
+
+def test_build_history_parquet_skips_html_non_bhavcopy_files(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    (raw / "BSE").mkdir(parents=True)
+    (raw / "BSE" / "BhavCopy_BSE_CM_0_0_0_20240815_F_0000.CSV").write_text(
+        "<!DOCTYPE html><html><body>holiday</body></html>",
+        encoding="utf-8",
+    )
+    _write_zip(raw / "BSE" / "EQ020126_CSV.ZIP", [_bse_row()])
+
+    _, frame = build_history_parquet(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full.parquet",
+        exchanges=["BSE"],
+        workers=2,
+        show_progress=False,
+    )
+
+    assert frame.height == 1
+    assert frame.get_column("symbol").to_list() == ["500001"]
+
+
+def test_build_history_parquet_skips_html_payload_saved_as_zip(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    (raw / "BSE").mkdir(parents=True)
+    (raw / "BSE" / "EQ010107_CSV.ZIP").write_text(
+        "<!DOCTYPE html><html><body>not zip</body></html>",
+        encoding="utf-8",
+    )
+    _write_zip(raw / "BSE" / "EQ020126_CSV.ZIP", [_bse_row()])
+
+    _, frame = build_history_parquet(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full.parquet",
+        exchanges=["BSE"],
+        workers=2,
+        show_progress=False,
+    )
+
+    assert frame.height == 1
+    assert frame.get_column("symbol").to_list() == ["500001"]
 
 
 def test_verify_history_frame_reports_pass_and_exchange_summary(tmp_path) -> None:
@@ -183,6 +228,7 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
     _write_zip(raw / "cm02JAN2026bhav.csv.zip", [_nse_row()])
     output = tmp_path / "daily_stock_data_full.parquet"
     report = tmp_path / "history_audit.json"
+    log_path = tmp_path / "history-build.log"
 
     build_code = main(
         [
@@ -195,6 +241,8 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
             "NSE",
             "--workers",
             "2",
+            "--log-path",
+            str(log_path),
             "--no-progress",
         ]
     )
@@ -205,7 +253,10 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
     assert verify_code == 0
     assert "history-build" in captured
     assert "workers=2" in captured
+    assert "log=" in captured
     assert "history-verify" in captured
+    assert log_path.exists()
+    assert "phase=build_start" in log_path.read_text(encoding="utf-8")
 
 
 def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, capsys) -> None:
