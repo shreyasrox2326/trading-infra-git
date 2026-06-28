@@ -26,21 +26,31 @@ Do not upload raw bhavcopy files as canonical R2 market data.
 
 ## 2. Local Full-History Bootstrap
 
-Fetch raw bhavcopy files into ignored local operator state:
+Fetch raw bhavcopy files into ignored local operator state. Run long downloads inside `tmux` and keep the per-date status log under `data/import/` or `data/raw/`.
 
 ```bash
+tmux new -s history-fetch
+
 python -m trading_infra history-fetch \
   --exchange NSE \
   --start-date 1994-01-01 \
   --end-date YYYY-MM-DD \
-  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE
+  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
+  --workers 8 \
+  --retries 3 \
+  --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
 
 python -m trading_infra history-fetch \
   --exchange BSE \
   --start-date 2007-01-01 \
   --end-date YYYY-MM-DD \
-  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/BSE
+  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/BSE \
+  --workers 8 \
+  --retries 3 \
+  --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-bse.log
 ```
+
+`history-fetch` is resumable by default: existing files are skipped unless `--overwrite` is passed. It uses a progress bar by default; use `--no-progress` only for non-interactive logging.
 
 Build one canonical parquet locally:
 

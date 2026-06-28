@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import Sequence
 
 from trading_infra.data.bhavcopy import fetch_bhavcopy_archives, write_canonical_bhavcopy_parquet
-from trading_infra.data.history import build_history_parquet, fetch_history_bhavcopies, summarize_history_frame
+from trading_infra.data.history import build_history_parquet, summarize_history_frame
 from trading_infra.data.history import write_history_audit
 from trading_infra.data.market_data import load_daily_stock_data
 from trading_infra.pipelines.backtest import run_backtest
@@ -87,6 +87,9 @@ def build_parser() -> argparse.ArgumentParser:
     bhavcopy_fetch.add_argument("--output-path", required=True)
     bhavcopy_fetch.add_argument("--log-path")
     bhavcopy_fetch.add_argument("--overwrite", action="store_true")
+    bhavcopy_fetch.add_argument("--workers", type=int, default=1)
+    bhavcopy_fetch.add_argument("--retries", type=int, default=3)
+    bhavcopy_fetch.add_argument("--progress", action="store_true")
 
     bhavcopy_ingest = subparsers.add_parser(
         "bhavcopy-ingest",
@@ -102,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     history_fetch.add_argument("--end-date", required=True)
     history_fetch.add_argument("--output-path", required=True)
     history_fetch.add_argument("--overwrite", action="store_true")
+    history_fetch.add_argument("--workers", type=int, default=8)
+    history_fetch.add_argument("--retries", type=int, default=3)
+    history_fetch.add_argument("--log-path")
+    history_fetch.add_argument("--progress", action="store_true", default=True)
+    history_fetch.add_argument("--no-progress", dest="progress", action="store_false")
 
     history_build = subparsers.add_parser("history-build", help="Build canonical full-history market-data parquet.")
     history_build.add_argument("--input-path", required=True)
@@ -290,6 +298,9 @@ def bhavcopy_fetch(args: argparse.Namespace) -> int:
         output_path=args.output_path,
         exchange=args.exchange,
         overwrite=args.overwrite,
+        workers=args.workers,
+        retries=args.retries,
+        show_progress=args.progress,
     )
     counts: dict[str, int] = {}
     for result in results:
@@ -332,16 +343,33 @@ def bhavcopy_ingest(args: argparse.Namespace) -> int:
 
 
 def history_fetch(args: argparse.Namespace) -> int:
-    counts = fetch_history_bhavcopies(
+    results = fetch_bhavcopy_archives(
         exchange=args.exchange,
         start_date=_parse_date(args.start_date),
         end_date=_parse_date(args.end_date),
         output_path=args.output_path,
         overwrite=args.overwrite,
+        workers=args.workers,
+        retries=args.retries,
+        show_progress=args.progress,
+    )
+    counts: dict[str, int] = {}
+    for result in results:
+        counts[result.status] = counts.get(result.status, 0) + 1
+    log_path = Path(args.log_path) if args.log_path else Path(args.output_path) / "history-fetch.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        "\n".join(
+            f"{result.requested_date},{result.status},{result.path.as_posix() if result.path else ''},{result.message}"
+            for result in results
+        )
+        + "\n",
+        encoding="utf-8",
     )
     print(
         f"history-fetch exchange={args.exchange.upper()} start_date={args.start_date} "
-        f"end_date={args.end_date} output_path={args.output_path} counts={counts}"
+        f"end_date={args.end_date} output_path={args.output_path} workers={args.workers} "
+        f"retries={args.retries} counts={counts} log={log_path.as_posix()}"
     )
     return 1 if counts.get("failed", 0) else 0
 

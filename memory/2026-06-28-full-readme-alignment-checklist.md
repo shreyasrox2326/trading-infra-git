@@ -34,8 +34,10 @@ Update rule:
   - 2026-06-28: Added BSE common-format filename and normalization support.
 - [x] Add local-only `history-fetch` command for NSE full-history raw bhavcopy download.
   - 2026-06-28: Added exchange-aware `history-fetch`.
+  - 2026-06-28: Optimized with bounded workers, retries, progress bar, resumability, and log output for long runs.
 - [x] Add local-only `history-fetch` command for BSE full-history raw bhavcopy download.
   - 2026-06-28: Added exchange-aware `history-fetch`.
+  - 2026-06-28: Optimized with bounded workers, retries, progress bar, resumability, and log output for long runs.
 - [x] Add local canonical `history-build` command that builds `data/import/daily_stock_data_full.parquet` from raw bhavcopy inputs.
   - 2026-06-28: Added `history-build`.
 - [x] Ensure canonical output matches the README `daily_stock_data` schema.

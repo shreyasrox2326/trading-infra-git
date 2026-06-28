@@ -22,6 +22,7 @@ This file is the navigation map for repo memory.
 - [README gap audit](logs/2026-06-28-readme-gap-audit.md)
 - [Historical NSE R2 load](logs/2026-06-28-historical-nse-r2-load.md)
 - [Full README alignment implementation](logs/2026-06-28-full-readme-alignment-implementation.md)
+- [History fetch optimization](logs/2026-06-28-history-fetch-optimization.md)
 
 ## Open Questions
 

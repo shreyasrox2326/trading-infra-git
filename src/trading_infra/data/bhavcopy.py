@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
+from time import sleep
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
 import polars as pl
+from tqdm import tqdm
 
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, DAILY_STOCK_DATA_SCHEMA
 
@@ -116,6 +119,8 @@ def fetch_bhavcopy_archive(
     exchange: str = "NSE",
     overwrite: bool = False,
     timeout_seconds: int = 30,
+    retries: int = 3,
+    retry_sleep_seconds: float = 1.0,
 ) -> BhavcopyFetchResult:
     """Fetch one exchange equity bhavcopy archive into local operator state."""
     exchange = _normalize_exchange(exchange)
@@ -132,18 +137,25 @@ def fetch_bhavcopy_archive(
             "Accept": "application/zip,text/csv,*/*",
         },
     )
-    try:
-        with urlopen(request, timeout=timeout_seconds) as response:
-            payload = response.read()
-    except HTTPError as exc:
-        if exc.code == 404:
-            return BhavcopyFetchResult(trade_date, "not_available", None, str(exc))
-        return BhavcopyFetchResult(trade_date, "failed", None, str(exc))
-    except URLError as exc:
-        return BhavcopyFetchResult(trade_date, "failed", None, str(exc))
+    attempts = max(1, retries + 1)
+    last_error = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                payload = response.read()
+            target.write_bytes(payload)
+            return BhavcopyFetchResult(trade_date, "downloaded", target)
+        except HTTPError as exc:
+            if exc.code == 404:
+                return BhavcopyFetchResult(trade_date, "not_available", None, str(exc))
+            last_error = str(exc)
+        except URLError as exc:
+            last_error = str(exc)
 
-    target.write_bytes(payload)
-    return BhavcopyFetchResult(trade_date, "downloaded", target)
+        if attempt < attempts:
+            sleep(retry_sleep_seconds * attempt)
+
+    return BhavcopyFetchResult(trade_date, "failed", None, last_error)
 
 
 def fetch_bhavcopy_archives(
@@ -153,17 +165,39 @@ def fetch_bhavcopy_archives(
     output_path: str | Path,
     exchange: str = "NSE",
     overwrite: bool = False,
+    workers: int = 1,
+    retries: int = 3,
+    timeout_seconds: int = 30,
+    show_progress: bool = False,
 ) -> list[BhavcopyFetchResult]:
     """Fetch exchange equity bhavcopy archives for all weekdays in a date range."""
-    return [
-        fetch_bhavcopy_archive(
+    days = trading_weekdays(start_date, end_date)
+
+    def fetch_one(trade_date: date) -> BhavcopyFetchResult:
+        return fetch_bhavcopy_archive(
             trade_date,
             output_path=output_path,
             exchange=exchange,
             overwrite=overwrite,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
         )
-        for trade_date in trading_weekdays(start_date, end_date)
-    ]
+
+    if workers <= 1:
+        iterable = tqdm(days, desc=f"{exchange.upper()} bhavcopy", unit="file") if show_progress else days
+        return [fetch_one(trade_date) for trade_date in iterable]
+
+    results_by_date: dict[date, BhavcopyFetchResult] = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(fetch_one, trade_date): trade_date for trade_date in days}
+        completed = as_completed(futures)
+        if show_progress:
+            completed = tqdm(completed, total=len(futures), desc=f"{exchange.upper()} bhavcopy", unit="file")
+        for future in completed:
+            trade_date = futures[future]
+            results_by_date[trade_date] = future.result()
+
+    return [results_by_date[trade_date] for trade_date in days]
 
 
 def _resolve_bhavcopy_inputs(input_path: str | Path) -> list[Path]:

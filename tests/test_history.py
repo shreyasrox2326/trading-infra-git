@@ -202,3 +202,46 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
     assert verify_code == 0
     assert "history-build" in captured
     assert "history-verify" in captured
+
+
+def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, capsys) -> None:
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"payload"
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", lambda *_args, **_kwargs: _Response())
+    log_path = tmp_path / "fetch.log"
+
+    exit_code = main(
+        [
+            "history-fetch",
+            "--exchange",
+            "NSE",
+            "--start-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-01-02",
+            "--output-path",
+            str(tmp_path / "raw"),
+            "--workers",
+            "2",
+            "--retries",
+            "0",
+            "--log-path",
+            str(log_path),
+            "--no-progress",
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "workers=2" in captured
+    assert "retries=0" in captured
+    assert log_path.exists()
+    assert "2026-01-01,downloaded" in log_path.read_text(encoding="utf-8")

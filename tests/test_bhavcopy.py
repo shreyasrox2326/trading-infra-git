@@ -10,6 +10,7 @@ from trading_infra.data.bhavcopy import (
     bhavcopy_archive_name,
     bhavcopy_archive_url,
     fetch_bhavcopy_archive,
+    fetch_bhavcopy_archives,
     normalize_bhavcopy_inputs,
     trading_weekdays,
     write_canonical_bhavcopy_parquet,
@@ -138,6 +139,36 @@ def test_fetch_bhavcopy_archive_without_network(monkeypatch, tmp_path) -> None:
     assert result.status == "downloaded"
     assert result.path == tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
     assert result.path.read_bytes() == b"payload"
+
+
+def test_fetch_bhavcopy_archives_parallel_preserves_date_order(monkeypatch, tmp_path) -> None:
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"payload"
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", lambda *_args, **_kwargs: _Response())
+
+    results = fetch_bhavcopy_archives(
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 6),
+        output_path=tmp_path,
+        workers=2,
+        retries=0,
+    )
+
+    assert [result.requested_date for result in results] == [
+        date(2026, 1, 1),
+        date(2026, 1, 2),
+        date(2026, 1, 5),
+        date(2026, 1, 6),
+    ]
+    assert {result.status for result in results} == {"downloaded"}
 
 
 def test_normalize_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:

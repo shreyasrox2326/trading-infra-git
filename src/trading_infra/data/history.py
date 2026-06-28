@@ -36,6 +36,9 @@ def fetch_history_bhavcopies(
     end_date: date,
     output_path: str | Path,
     overwrite: bool = False,
+    workers: int = 1,
+    retries: int = 3,
+    show_progress: bool = False,
 ) -> dict[str, int]:
     """Fetch raw bhavcopy files for one exchange and return status counts."""
     results = fetch_bhavcopy_archives(
@@ -44,6 +47,9 @@ def fetch_history_bhavcopies(
         end_date=end_date,
         output_path=output_path,
         overwrite=overwrite,
+        workers=workers,
+        retries=retries,
+        show_progress=show_progress,
     )
     counts: dict[str, int] = {}
     for result in results:
