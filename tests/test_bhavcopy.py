@@ -246,6 +246,33 @@ def test_fetch_bhavcopy_archives_parallel_preserves_date_order(monkeypatch, tmp_
     assert {result.status for result in results} == {"downloaded"}
 
 
+def test_fetch_bhavcopy_archives_calls_result_callback(monkeypatch, tmp_path) -> None:
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"payload"
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", lambda *_args, **_kwargs: _Response())
+    callback_dates = []
+
+    results = fetch_bhavcopy_archives(
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 2),
+        output_path=tmp_path,
+        workers=1,
+        retries=0,
+        on_result=lambda result: callback_dates.append(result.requested_date),
+    )
+
+    assert callback_dates == [date(2026, 1, 1), date(2026, 1, 2)]
+    assert [result.requested_date for result in results] == callback_dates
+
+
 def test_normalize_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
     source = tmp_path / "cm02JAN2026bhav.csv.zip"
     _write_bhavcopy_zip(source, [_row()])

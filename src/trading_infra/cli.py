@@ -347,6 +347,18 @@ def bhavcopy_ingest(args: argparse.Namespace) -> int:
 
 
 def history_fetch(args: argparse.Namespace) -> int:
+    log_path = Path(args.log_path) if args.log_path else Path(args.output_path) / "history-fetch.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("", encoding="utf-8")
+
+    def log_result(result) -> None:
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{result.requested_date},{result.status},"
+                f"{result.path.as_posix() if result.path else ''},{result.message}\n"
+            )
+            handle.flush()
+
     results = fetch_bhavcopy_archives(
         exchange=args.exchange,
         start_date=_parse_date(args.start_date),
@@ -356,20 +368,11 @@ def history_fetch(args: argparse.Namespace) -> int:
         workers=args.workers,
         retries=args.retries,
         show_progress=args.progress,
+        on_result=log_result,
     )
     counts: dict[str, int] = {}
     for result in results:
         counts[result.status] = counts.get(result.status, 0) + 1
-    log_path = Path(args.log_path) if args.log_path else Path(args.output_path) / "history-fetch.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_text(
-        "\n".join(
-            f"{result.requested_date},{result.status},{result.path.as_posix() if result.path else ''},{result.message}"
-            for result in results
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     print(
         f"history-fetch exchange={args.exchange.upper()} start_date={args.start_date} "
         f"end_date={args.end_date} output_path={args.output_path} workers={args.workers} "

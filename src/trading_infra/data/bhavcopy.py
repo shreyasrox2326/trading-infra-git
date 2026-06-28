@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 from time import sleep
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
@@ -205,6 +206,7 @@ def fetch_bhavcopy_archives(
     retries: int = 3,
     timeout_seconds: int = 30,
     show_progress: bool = False,
+    on_result: Callable[[BhavcopyFetchResult], None] | None = None,
 ) -> list[BhavcopyFetchResult]:
     """Fetch exchange equity bhavcopy archives for all weekdays in a date range."""
     days = trading_weekdays(start_date, end_date)
@@ -221,7 +223,13 @@ def fetch_bhavcopy_archives(
 
     if workers <= 1:
         iterable = tqdm(days, desc=f"{exchange.upper()} bhavcopy", unit="file") if show_progress else days
-        return [fetch_one(trade_date) for trade_date in iterable]
+        results = []
+        for trade_date in iterable:
+            result = fetch_one(trade_date)
+            if on_result is not None:
+                on_result(result)
+            results.append(result)
+        return results
 
     results_by_date: dict[date, BhavcopyFetchResult] = {}
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -231,7 +239,10 @@ def fetch_bhavcopy_archives(
             completed = tqdm(completed, total=len(futures), desc=f"{exchange.upper()} bhavcopy", unit="file")
         for future in completed:
             trade_date = futures[future]
-            results_by_date[trade_date] = future.result()
+            result = future.result()
+            if on_result is not None:
+                on_result(result)
+            results_by_date[trade_date] = result
 
     return [results_by_date[trade_date] for trade_date in days]
 

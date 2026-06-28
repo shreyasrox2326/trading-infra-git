@@ -220,6 +220,8 @@ Update rule:
   - 2026-06-28: Historical upload and daily refresh use staging prefixes.
 - [x] R2 upload keeps logs concise.
   - 2026-06-28: CLI output is summary-oriented.
+- [x] Long local fetches write tail-able logs during execution.
+  - 2026-06-28: `history-fetch` now appends and flushes one status line as each date completes.
 - [x] R2 upload writes manifest for reproducibility.
   - 2026-06-28: `history-upload` writes `data/daily_stock_data/_manifest.json`.
 - [x] Daily cloud fetches one date per exchange.
