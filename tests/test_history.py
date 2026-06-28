@@ -193,6 +193,9 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
             str(output),
             "--exchange",
             "NSE",
+            "--workers",
+            "2",
+            "--no-progress",
         ]
     )
     verify_code = main(["history-verify", "--path", str(output), "--report-path", str(report)])
@@ -201,6 +204,7 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
     assert build_code == 0
     assert verify_code == 0
     assert "history-build" in captured
+    assert "workers=2" in captured
     assert "history-verify" in captured
 
 

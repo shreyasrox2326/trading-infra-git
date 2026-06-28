@@ -115,6 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     history_build.add_argument("--input-path", required=True)
     history_build.add_argument("--output-path", required=True)
     history_build.add_argument("--exchange", action="append")
+    history_build.add_argument("--workers", type=int, default=4)
+    history_build.add_argument("--progress", action="store_true", default=True)
+    history_build.add_argument("--no-progress", dest="progress", action="store_false")
 
     history_verify = subparsers.add_parser("history-verify", help="Verify canonical full-history market-data parquet.")
     history_verify.add_argument("--path", required=True)
@@ -379,12 +382,14 @@ def history_build(args: argparse.Namespace) -> int:
         input_path=args.input_path,
         output_path=args.output_path,
         exchanges=args.exchange,
+        workers=args.workers,
+        show_progress=args.progress,
     )
     summary = summarize_history_frame(frame)
     print(
         f"history-build input_path={args.input_path} output_path={output_path.as_posix()} "
         f"rows={summary['rows']} date_min={summary['date_min']} date_max={summary['date_max']} "
-        f"exchanges={summary['exchanges']} symbols={summary['symbols']}"
+        f"exchanges={summary['exchanges']} symbols={summary['symbols']} workers={args.workers}"
     )
     return 0
 

@@ -205,6 +205,7 @@ Update rule:
   - 2026-06-28: History build uses Polars DataFrames and canonical batch transforms.
 - [x] Local full-history build batch-parses files.
   - 2026-06-28: Normalization reads files into frames and concatenates by exchange.
+  - 2026-06-28: `history-build` now supports bounded parallel per-file parsing with progress bars.
 - [x] Local full-history build avoids row-by-row loops over market data.
   - 2026-06-28: Build/verify paths use Polars expressions and aggregations.
 - [x] Local full-history build writes partitioned parquet from canonical frame.

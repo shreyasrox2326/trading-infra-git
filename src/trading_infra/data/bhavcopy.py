@@ -266,60 +266,69 @@ def _vwap_expr(turnover: pl.Expr, volume: pl.Expr, fallback: pl.Expr | None = No
     return pl.coalesce(fallback.cast(pl.Float64), calculated)
 
 
+def normalize_bhavcopy_frame(frame: pl.DataFrame, *, exchange: str) -> pl.DataFrame:
+    """Normalize one raw exchange bhavcopy frame into canonical daily stock data."""
+    exchange = _normalize_exchange(exchange)
+
+    timestamp = _column_expr(frame, "TIMESTAMP", "DATE", "TRADEDATE", "TRADDT", "BIZDT")
+    open_price = _column_expr(frame, "OPEN", "OPNPRIC")
+    high = _column_expr(frame, "HIGH", "HGHPRIC")
+    low = _column_expr(frame, "LOW", "LWPRIC")
+    close = _column_expr(frame, "CLOSE", "CLSPRIC")
+    prev_close = _column_expr(frame, "PREVCLOSE", "PRVSCLSGPRIC")
+    volume = _column_expr(frame, "TOTTRDQTY", "TTLTRDQNTY", "NOOFSHRS", "VOLUME", "TTLTRADGVOL")
+    turnover = _column_expr(frame, "TOTTRDVAL", "NETTURNOV", "TURNOVER", "TTLTRFVAL")
+    isin = _column_expr(frame, "ISIN", "SC CODE", "SCCODE", "FININSTRMID")
+    symbol = _column_expr(frame, "SYMBOL", "TCKRSYMB", "SCCODE", "SCNAME", "FININSTRMNM")
+    series = _column_expr(frame, "SERIES", "SCTYSRS", "SCGROUP", default=pl.lit("EQ"))
+    vwap = _vwap_expr(turnover, volume, _column_expr(frame, "VWAP", "AVGPERIC", default=pl.lit(None)))
+
+    return frame.select(
+        _parse_bhavcopy_date(timestamp).alias("date"),
+        pl.lit(exchange).alias("exchange"),
+        isin.cast(pl.Utf8).alias("isin"),
+        symbol.cast(pl.Utf8).alias("symbol"),
+        series.cast(pl.Utf8).alias("series"),
+        open_price.cast(pl.Float64).alias("open"),
+        high.cast(pl.Float64).alias("high"),
+        low.cast(pl.Float64).alias("low"),
+        close.cast(pl.Float64).alias("close"),
+        prev_close.cast(pl.Float64).alias("prev_close"),
+        vwap.alias("vwap"),
+        volume.cast(pl.Int64).alias("volume"),
+        turnover.cast(pl.Float64).alias("turnover"),
+        _column_expr(
+            frame,
+            "TOTALTRADES",
+            "NOOFTRADES",
+            "NOTRADES",
+            "TRADES",
+            "TTLNBOFTXSEXCTD",
+            default=pl.lit(None),
+        )
+        .cast(pl.Int64)
+        .alias("trades"),
+        _column_expr(frame, "DELIVQTY", "DELIVERABLEQTY", default=pl.lit(None)).cast(pl.Int64).alias("deliverable_qty"),
+        _column_expr(frame, "DELIVPER", "DELIVERYPCT", default=pl.lit(None)).cast(pl.Float64).alias("delivery_pct"),
+        open_price.cast(pl.Float64).alias("adj_open"),
+        high.cast(pl.Float64).alias("adj_high"),
+        low.cast(pl.Float64).alias("adj_low"),
+        close.cast(pl.Float64).alias("adj_close"),
+        pl.lit(1.0).alias("adj_factor"),
+    )
+
+
+def normalize_bhavcopy_file(path: str | Path, *, exchange: str) -> pl.DataFrame:
+    """Normalize one raw exchange bhavcopy file into canonical daily stock data."""
+    return normalize_bhavcopy_frame(_read_bhavcopy_file(Path(path)), exchange=exchange)
+
+
 def normalize_bhavcopy_inputs(input_path: str | Path, *, exchange: str) -> pl.DataFrame:
     """Normalize raw exchange bhavcopy files into canonical daily stock data."""
-    exchange = _normalize_exchange(exchange)
-    frames = [_read_bhavcopy_file(path) for path in _resolve_bhavcopy_inputs(input_path)]
-    normalized_frames: list[pl.DataFrame] = []
-
-    for frame in frames:
-        timestamp = _column_expr(frame, "TIMESTAMP", "DATE", "TRADEDATE", "TRADDT", "BIZDT")
-        open_price = _column_expr(frame, "OPEN", "OPNPRIC")
-        high = _column_expr(frame, "HIGH", "HGHPRIC")
-        low = _column_expr(frame, "LOW", "LWPRIC")
-        close = _column_expr(frame, "CLOSE", "CLSPRIC")
-        prev_close = _column_expr(frame, "PREVCLOSE", "PRVSCLSGPRIC")
-        volume = _column_expr(frame, "TOTTRDQTY", "TTLTRDQNTY", "NOOFSHRS", "VOLUME", "TTLTRADGVOL")
-        turnover = _column_expr(frame, "TOTTRDVAL", "NETTURNOV", "TURNOVER", "TTLTRFVAL")
-        isin = _column_expr(frame, "ISIN", "SC CODE", "SCCODE", "FININSTRMID")
-        symbol = _column_expr(frame, "SYMBOL", "TCKRSYMB", "SCCODE", "SCNAME", "FININSTRMNM")
-        series = _column_expr(frame, "SERIES", "SCTYSRS", "SCGROUP", default=pl.lit("EQ"))
-        vwap = _vwap_expr(turnover, volume, _column_expr(frame, "VWAP", "AVGPERIC", default=pl.lit(None)))
-
-        normalized = frame.select(
-            _parse_bhavcopy_date(timestamp).alias("date"),
-            pl.lit(exchange).alias("exchange"),
-            isin.cast(pl.Utf8).alias("isin"),
-            symbol.cast(pl.Utf8).alias("symbol"),
-            series.cast(pl.Utf8).alias("series"),
-            open_price.cast(pl.Float64).alias("open"),
-            high.cast(pl.Float64).alias("high"),
-            low.cast(pl.Float64).alias("low"),
-            close.cast(pl.Float64).alias("close"),
-            prev_close.cast(pl.Float64).alias("prev_close"),
-            vwap.alias("vwap"),
-            volume.cast(pl.Int64).alias("volume"),
-            turnover.cast(pl.Float64).alias("turnover"),
-            _column_expr(
-                frame,
-                "TOTALTRADES",
-                "NOOFTRADES",
-                "NOTRADES",
-                "TRADES",
-                "TTLNBOFTXSEXCTD",
-                default=pl.lit(None),
-            )
-            .cast(pl.Int64)
-            .alias("trades"),
-            _column_expr(frame, "DELIVQTY", "DELIVERABLEQTY", default=pl.lit(None)).cast(pl.Int64).alias("deliverable_qty"),
-            _column_expr(frame, "DELIVPER", "DELIVERYPCT", default=pl.lit(None)).cast(pl.Float64).alias("delivery_pct"),
-            open_price.cast(pl.Float64).alias("adj_open"),
-            high.cast(pl.Float64).alias("adj_high"),
-            low.cast(pl.Float64).alias("adj_low"),
-            close.cast(pl.Float64).alias("adj_close"),
-            pl.lit(1.0).alias("adj_factor"),
-        )
-        normalized_frames.append(normalized)
+    normalized_frames = [
+        normalize_bhavcopy_file(path, exchange=exchange)
+        for path in _resolve_bhavcopy_inputs(input_path)
+    ]
 
     combined = pl.concat(normalized_frames).select(
         [pl.col(column).cast(DAILY_STOCK_DATA_SCHEMA[column]) for column in DAILY_STOCK_DATA_COLUMNS]

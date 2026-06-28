@@ -57,8 +57,11 @@ Build one canonical parquet locally:
 ```bash
 python -m trading_infra history-build \
   --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
-  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet
+  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet \
+  --workers 4
 ```
+
+`history-build` shows progress by default. Use `--no-progress` only for non-interactive logging.
 
 Current ingestion uses identity adjustment:
 

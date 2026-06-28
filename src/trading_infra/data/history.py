@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+from tqdm import tqdm
 
 from trading_infra.data.bhavcopy import (
+    _resolve_bhavcopy_inputs,
     fetch_bhavcopy_archives,
-    normalize_bhavcopy_inputs,
+    normalize_bhavcopy_file,
     summarize_canonical_bhavcopy,
 )
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, DAILY_STOCK_DATA_SCHEMA
@@ -62,11 +65,45 @@ def _exchange_input_path(root: Path, exchange: str) -> Path:
     return exchange_root if exchange_root.exists() else root
 
 
+def _normalize_exchange_files(
+    files: list[Path],
+    *,
+    exchange: str,
+    workers: int,
+    show_progress: bool,
+) -> pl.DataFrame:
+    if not files:
+        raise FileNotFoundError(f"No bhavcopy CSV or ZIP files found for exchange={exchange}.")
+
+    def normalize_one(path: Path) -> pl.DataFrame:
+        return normalize_bhavcopy_file(path, exchange=exchange)
+
+    if workers <= 1:
+        iterable = tqdm(files, desc=f"{exchange} build", unit="file") if show_progress else files
+        frames = [normalize_one(path) for path in iterable]
+    else:
+        frames_by_index: dict[int, pl.DataFrame] = {}
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(normalize_one, path): index for index, path in enumerate(files)}
+            completed = as_completed(futures)
+            if show_progress:
+                completed = tqdm(completed, total=len(futures), desc=f"{exchange} build", unit="file")
+            for future in completed:
+                frames_by_index[futures[future]] = future.result()
+        frames = [frames_by_index[index] for index in range(len(files))]
+
+    return pl.concat(frames).select(
+        [pl.col(column).cast(DAILY_STOCK_DATA_SCHEMA[column]) for column in DAILY_STOCK_DATA_COLUMNS]
+    )
+
+
 def build_history_parquet(
     *,
     input_path: str | Path,
     output_path: str | Path,
     exchanges: list[str] | None = None,
+    workers: int = 1,
+    show_progress: bool = False,
 ) -> tuple[Path, pl.DataFrame]:
     """Build one canonical full-history parquet from raw exchange bhavcopy files."""
     input_root = Path(input_path)
@@ -75,7 +112,15 @@ def build_history_parquet(
         source = _exchange_input_path(input_root, exchange)
         if not source.exists():
             continue
-        frames.append(normalize_bhavcopy_inputs(source, exchange=exchange))
+        files = _resolve_bhavcopy_inputs(source)
+        frames.append(
+            _normalize_exchange_files(
+                files,
+                exchange=exchange,
+                workers=workers,
+                show_progress=show_progress,
+            )
+        )
 
     if not frames:
         raise FileNotFoundError(f"No bhavcopy inputs found under: {input_root}")
