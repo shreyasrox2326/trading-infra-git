@@ -96,6 +96,8 @@ adj_factor=1.0
 
 Delivery fields may be null when the source bhavcopy does not include them.
 
+Older NSE legacy bhavcopies do not include `ISIN`. For those rows, canonical `isin` is populated with the source `SYMBOL` so the full history keeps a non-null security identifier.
+
 ## 3. Local Verification Before Upload
 
 Verify before any R2 historical replacement:

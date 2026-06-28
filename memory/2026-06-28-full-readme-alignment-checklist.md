@@ -27,6 +27,7 @@ Update rule:
 - [x] Add exchange source adapter for NSE legacy `cmDDMONYYYYbhav.csv.zip`.
   - 2026-06-28: Existing NSE legacy parser retained and covered by tests.
   - 2026-06-28: Fetch path now uses NSE-compatible request headers and official `nsearchives` fallback for pre-2016 files that previously returned 403.
+  - 2026-06-28: Pre-ISIN NSE legacy files now normalize by using source `SYMBOL` as canonical `isin`; single-digit legacy dates such as `1-APR-1996` are parsed.
 - [x] Add exchange source adapter for NSE UDiFF/common `BhavCopy_NSE_CM_0_0_0_YYYYMMDD_F_0000.csv.zip`.
   - 2026-06-28: Existing NSE UDiFF parser retained and covered by tests.
 - [x] Add exchange source adapter for BSE legacy `EQDDMMYY_CSV.ZIP`.

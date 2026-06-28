@@ -12,6 +12,7 @@ This file is the navigation map for repo memory.
 - [Infrastructure ready checklist](decisions/2026-06-27-infra-ready-checklist.md)
 - [Market data publishing](decisions/2026-06-28-market-data-publishing.md)
 - [Progress tracking](decisions/2026-06-28-progress-tracking.md)
+- [NSE legacy symbol identifier](decisions/2026-06-28-nse-legacy-symbol-identifier.md)
 
 ## Session Logs
 

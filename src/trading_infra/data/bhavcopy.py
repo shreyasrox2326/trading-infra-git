@@ -363,14 +363,20 @@ def _parse_bhavcopy_date(expr: pl.Expr) -> pl.Expr:
     """Parse NSE bhavcopy date strings with two- or four-digit years."""
     text = expr.cast(pl.Utf8)
     iso_date = text.str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+    raw_year = text.str.split("-").list.get(2, null_on_oob=True)
+    legacy_four_digit_year = (
+        pl.when(raw_year.str.len_chars() == 4)
+        .then(text.str.strptime(pl.Date, "%d-%b-%Y", strict=False))
+        .otherwise(pl.lit(None, dtype=pl.Date))
+    )
     day = text.str.slice(0, 2)
     month = text.str.slice(3, 3).str.to_uppercase().replace(NSE_MONTH_NUMBERS)
-    raw_year = text.str.slice(7)
-    year = pl.when(raw_year.str.len_chars() == 2).then(pl.lit("20") + raw_year).otherwise(raw_year)
+    sliced_year = text.str.slice(7)
+    year = pl.when(sliced_year.str.len_chars() == 2).then(pl.lit("20") + sliced_year).otherwise(sliced_year)
     legacy_date = (year + pl.lit("-") + month + pl.lit("-") + day).str.strptime(
         pl.Date, "%Y-%m-%d", strict=False
     )
-    return pl.coalesce(iso_date, legacy_date)
+    return pl.coalesce(iso_date, legacy_four_digit_year, legacy_date)
 
 
 def _vwap_expr(turnover: pl.Expr, volume: pl.Expr, fallback: pl.Expr | None = None) -> pl.Expr:
@@ -392,8 +398,15 @@ def normalize_bhavcopy_frame(frame: pl.DataFrame, *, exchange: str) -> pl.DataFr
     prev_close = _column_expr(frame, "PREVCLOSE", "PRVSCLSGPRIC")
     volume = _column_expr(frame, "TOTTRDQTY", "TTLTRDQNTY", "NOOFSHRS", "VOLUME", "TTLTRADGVOL")
     turnover = _column_expr(frame, "TOTTRDVAL", "NETTURNOV", "TURNOVER", "TTLTRFVAL")
-    isin = _column_expr(frame, "ISIN", "SC CODE", "SCCODE", "FININSTRMID")
     symbol = _column_expr(frame, "SYMBOL", "TCKRSYMB", "SCCODE", "SCNAME", "FININSTRMNM")
+    isin = _column_expr(
+        frame,
+        "ISIN",
+        "SC CODE",
+        "SCCODE",
+        "FININSTRMID",
+        default=symbol if exchange == "NSE" else None,
+    )
     series = _column_expr(frame, "SERIES", "SCTYSRS", "SCGROUP", default=pl.lit("EQ"))
     vwap = _vwap_expr(turnover, volume, _column_expr(frame, "VWAP", "AVGPERIC", default=pl.lit(None)))
 

@@ -332,6 +332,23 @@ def test_normalize_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
     assert frame.get_column("deliverable_qty").null_count() == 1
 
 
+def test_normalize_old_nse_legacy_without_isin_uses_symbol_identifier(tmp_path) -> None:
+    source = tmp_path / "cm01APR1996bhav.csv.zip"
+    row = _row(symbol="20THCENFIN")
+    row.pop("ISIN")
+    row.pop("TOTALTRADES")
+    row["TIMESTAMP"] = "1-APR-1996"
+    _write_bhavcopy_zip(source, [row])
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="NSE")
+
+    assert frame.get_column("date").to_list() == [date(1996, 4, 1)]
+    assert frame.get_column("exchange").to_list() == ["NSE"]
+    assert frame.get_column("isin").to_list() == ["20THCENFIN"]
+    assert frame.get_column("symbol").to_list() == ["20THCENFIN"]
+    assert frame.get_column("trades").null_count() == 1
+
+
 def test_normalize_udiff_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
     source = tmp_path / "BhavCopy_NSE_CM_0_0_0_20240709_F_0000.csv.zip"
     _write_bhavcopy_zip(source, [_udiff_row()])
