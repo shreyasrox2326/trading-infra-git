@@ -26,6 +26,7 @@ Update rule:
 
 - [x] Add exchange source adapter for NSE legacy `cmDDMONYYYYbhav.csv.zip`.
   - 2026-06-28: Existing NSE legacy parser retained and covered by tests.
+  - 2026-06-28: Fetch path now uses NSE-compatible request headers and official `nsearchives` fallback for pre-2016 files that previously returned 403.
 - [x] Add exchange source adapter for NSE UDiFF/common `BhavCopy_NSE_CM_0_0_0_YYYYMMDD_F_0000.csv.zip`.
   - 2026-06-28: Existing NSE UDiFF parser retained and covered by tests.
 - [x] Add exchange source adapter for BSE legacy `EQDDMMYY_CSV.ZIP`.
@@ -35,6 +36,7 @@ Update rule:
 - [x] Add local-only `history-fetch` command for NSE full-history raw bhavcopy download.
   - 2026-06-28: Added exchange-aware `history-fetch`.
   - 2026-06-28: Optimized with bounded workers, retries, progress bar, resumability, and log output for long runs.
+  - 2026-06-28: Live smoke confirmed `2015-12-31` downloads and normalizes successfully from official NSE archives.
 - [x] Add local-only `history-fetch` command for BSE full-history raw bhavcopy download.
   - 2026-06-28: Added exchange-aware `history-fetch`.
   - 2026-06-28: Optimized with bounded workers, retries, progress bar, resumability, and log output for long runs.
@@ -239,7 +241,8 @@ Update rule:
   - 2026-06-28: Added BSE legacy parser test.
 - [x] Add parser test for BSE UDiFF.
   - 2026-06-28: Added BSE common-format parser test.
-- [ ] Add parser test for missing/holiday files.
+- [x] Add parser test for missing/holiday files.
+  - 2026-06-28: HTML/error-page responses are tested as unavailable bhavcopy files rather than persisted data.
 - [x] Add history build test for canonical schema.
   - 2026-06-28: Added history build schema test.
 - [x] Add history build test for duplicate rejection.

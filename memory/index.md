@@ -27,6 +27,7 @@ This file is the navigation map for repo memory.
 - [BSE ragged CSV fix](logs/2026-06-28-bse-ragged-csv-fix.md)
 - [Strict bhavcopy row quality](logs/2026-06-28-strict-bhavcopy-row-quality.md)
 - [Partition-first history build](logs/2026-06-28-partition-first-history-build.md)
+- [NSE pre-2016 fetch fix](logs/2026-06-28-nse-pre2016-fetch-fix.md)
 
 ## Open Questions
 

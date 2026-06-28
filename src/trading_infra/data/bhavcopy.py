@@ -20,6 +20,9 @@ from tqdm import tqdm
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, DAILY_STOCK_DATA_SCHEMA
 
 NSE_ARCHIVE_BASE_URL = "https://archives.nseindia.com/content/historical/EQUITIES"
+NSE_ARCHIVE_FALLBACK_BASE_URLS = (
+    "https://nsearchives.nseindia.com/content/historical/EQUITIES",
+)
 NSE_UDIFF_BASE_URL = "https://archives.nseindia.com/content/cm"
 NSE_UDIFF_START_DATE = date(2024, 7, 8)
 BSE_ARCHIVE_BASE_URL = "https://www.bseindia.com/download/BhavCopy/Equity"
@@ -104,6 +107,24 @@ def bhavcopy_archive_url(trade_date: date, *, exchange: str = "NSE") -> str:
     return f"{BSE_ARCHIVE_BASE_URL}/{filename}"
 
 
+def bhavcopy_archive_urls(trade_date: date, *, exchange: str = "NSE") -> list[str]:
+    """Return official exchange bhavcopy URLs to try for one trade date."""
+    exchange = _normalize_exchange(exchange)
+    primary = bhavcopy_archive_url(trade_date, exchange=exchange)
+    if exchange != "NSE" or trade_date >= NSE_UDIFF_START_DATE:
+        return [primary]
+
+    month = NSE_MONTHS[trade_date.month]
+    filename = bhavcopy_archive_name(trade_date, exchange=exchange)
+    return [
+        primary,
+        *[
+            f"{base_url}/{trade_date:%Y}/{month}/{filename}"
+            for base_url in NSE_ARCHIVE_FALLBACK_BASE_URLS
+        ],
+    ]
+
+
 def trading_weekdays(start_date: date, end_date: date) -> list[date]:
     """Return weekday dates in an inclusive range."""
     if end_date < start_date:
@@ -136,33 +157,40 @@ def fetch_bhavcopy_archive(
     if target.exists() and not overwrite:
         return BhavcopyFetchResult(trade_date, "skipped_existing", target)
 
-    request = Request(
-        bhavcopy_archive_url(trade_date, exchange=exchange),
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/zip,text/csv,*/*",
-        },
-    )
     attempts = max(1, retries + 1)
     last_error = ""
     for attempt in range(1, attempts + 1):
-        try:
-            with urlopen(request, timeout=timeout_seconds) as response:
-                payload = response.read()
-            if _looks_like_html(payload):
-                return BhavcopyFetchResult(trade_date, "not_available", None, "HTML response instead of bhavcopy data.")
-            target.write_bytes(payload)
-            return BhavcopyFetchResult(trade_date, "downloaded", target)
-        except HTTPError as exc:
-            if exc.code == 404:
-                return BhavcopyFetchResult(trade_date, "not_available", None, str(exc))
-            last_error = str(exc)
-        except URLError as exc:
-            last_error = str(exc)
+        for url in bhavcopy_archive_urls(trade_date, exchange=exchange):
+            request = Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/zip,text/csv,*/*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Referer": "https://www.nseindia.com/",
+                },
+            )
+            try:
+                with urlopen(request, timeout=timeout_seconds) as response:
+                    payload = response.read()
+                if _looks_like_html(payload):
+                    last_error = "HTML response instead of bhavcopy data."
+                    continue
+                target.write_bytes(payload)
+                return BhavcopyFetchResult(trade_date, "downloaded", target, url)
+            except HTTPError as exc:
+                if exc.code == 404:
+                    last_error = str(exc)
+                    continue
+                last_error = str(exc)
+            except URLError as exc:
+                last_error = str(exc)
 
         if attempt < attempts:
             sleep(retry_sleep_seconds * attempt)
 
+    if last_error.startswith("HTTP Error 404") or last_error == "HTML response instead of bhavcopy data.":
+        return BhavcopyFetchResult(trade_date, "not_available", None, last_error)
     return BhavcopyFetchResult(trade_date, "failed", None, last_error)
 
 

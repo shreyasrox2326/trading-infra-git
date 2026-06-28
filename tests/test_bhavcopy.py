@@ -9,6 +9,7 @@ import pytest
 from trading_infra.data.bhavcopy import (
     bhavcopy_archive_name,
     bhavcopy_archive_url,
+    bhavcopy_archive_urls,
     fetch_bhavcopy_archive,
     fetch_bhavcopy_archives,
     normalize_bhavcopy_inputs,
@@ -126,6 +127,15 @@ def test_bhavcopy_archive_name_switches_to_udiff_from_2024_07_08() -> None:
     )
 
 
+def test_nse_legacy_bhavcopy_archive_urls_include_official_mirror() -> None:
+    urls = bhavcopy_archive_urls(date(2015, 12, 31), exchange="NSE")
+
+    assert urls == [
+        "https://archives.nseindia.com/content/historical/EQUITIES/2015/DEC/cm31DEC2015bhav.csv.zip",
+        "https://nsearchives.nseindia.com/content/historical/EQUITIES/2015/DEC/cm31DEC2015bhav.csv.zip",
+    ]
+
+
 def test_bse_bhavcopy_archive_names_support_legacy_and_udiff() -> None:
     assert bhavcopy_archive_name(date(2024, 7, 29), exchange="BSE") == "EQ290724_CSV.ZIP"
     assert bhavcopy_archive_name(date(2024, 7, 30), exchange="BSE") == "BhavCopy_BSE_CM_0_0_0_20240730_F_0000.CSV"
@@ -172,6 +182,38 @@ def test_fetch_bhavcopy_archive_treats_html_response_as_not_available(monkeypatc
     assert result.status == "not_available"
     assert result.path is None
     assert not (tmp_path / bhavcopy_archive_name(date(2026, 1, 2))).exists()
+
+
+def test_fetch_nse_legacy_bhavcopy_archive_tries_mirror_after_primary_error(monkeypatch, tmp_path) -> None:
+    from urllib.error import HTTPError
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"payload"
+
+    requested_urls = []
+
+    def fake_urlopen(request, **_kwargs):
+        requested_urls.append(request.full_url)
+        if len(requested_urls) == 1:
+            raise HTTPError(request.full_url, 403, "Forbidden", hdrs=None, fp=None)
+        return _Response()
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", fake_urlopen)
+
+    result = fetch_bhavcopy_archive(date(2015, 12, 31), output_path=tmp_path, retries=0)
+
+    assert result.status == "downloaded"
+    assert result.message == requested_urls[1]
+    assert requested_urls == bhavcopy_archive_urls(date(2015, 12, 31), exchange="NSE")
+    assert result.path == tmp_path / "cm31DEC2015bhav.csv.zip"
+    assert result.path.read_bytes() == b"payload"
 
 
 def test_fetch_bhavcopy_archives_parallel_preserves_date_order(monkeypatch, tmp_path) -> None:
