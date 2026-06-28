@@ -10,10 +10,20 @@ on:
         required: false
         type: string
       exchange:
-        description: "Exchange partition to load from R2."
+        description: "Whitespace-separated exchange partitions to refresh and run. Defaults to NSE BSE."
         required: false
-        default: "NSE"
+        default: "NSE BSE"
         type: string
+      skip_market_refresh:
+        description: "Skip bhavcopy refresh before paper evaluation. Manual emergency use only."
+        required: false
+        default: false
+        type: boolean
+      upload_results:
+        description: "Upload paper decisions to R2."
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   daily-paper:
@@ -23,7 +33,9 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_S3_API: ${{ secrets.R2_S3_API }}
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-      EXCHANGE: ${{ inputs.exchange || 'NSE' }}
+      EXCHANGES: ${{ inputs.exchange || 'NSE BSE' }}
+      SKIP_MARKET_REFRESH: ${{ inputs.skip_market_refresh || false }}
+      UPLOAD_RESULTS: ${{ inputs.upload_results != false }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -46,10 +58,44 @@ jobs:
             echo "value=$(date -u +%F)" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run daily paper workflow
-        run: >
-          python -m trading_infra paper-dry-run
-          --date "${{ steps.run-date.outputs.value }}"
-          --use-r2
-          --exchange "${EXCHANGE}"
-          --upload-results
+      - name: Refresh market data and run daily paper workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for exchange in ${EXCHANGES}; do
+            echo "exchange=${exchange} run_date=${{ steps.run-date.outputs.value }}"
+
+            refresh_status="skipped"
+            if [ "${SKIP_MARKET_REFRESH}" != "true" ]; then
+              set +e
+              refresh_output="$(
+                python -m trading_infra market-data-refresh \
+                  --date "${{ steps.run-date.outputs.value }}" \
+                  --exchange "${exchange}" 2>&1
+              )"
+              refresh_code=$?
+              set -e
+              echo "${refresh_output}"
+              if [ "${refresh_code}" -ne 0 ]; then
+                exit "${refresh_code}"
+              fi
+              refresh_status="$(echo "${refresh_output}" | sed -n 's/.*status=\([^ ]*\).*/\1/p' | tail -1)"
+            fi
+
+            if [ "${refresh_status}" = "no_data" ]; then
+              echo "No market data for ${exchange} on ${{ steps.run-date.outputs.value }}; skipping paper evaluation."
+              continue
+            fi
+
+            paper_command=(
+              python -m trading_infra paper-dry-run
+              --date "${{ steps.run-date.outputs.value }}"
+              --use-r2
+              --exchange "${exchange}"
+            )
+            if [ "${UPLOAD_RESULTS}" = "true" ]; then
+              paper_command+=(--upload-results)
+            fi
+            "${paper_command[@]}"
+          done

@@ -135,20 +135,34 @@ Update rule:
 
 ## Stage 6: GitHub Actions Cron Workflow
 
-- [ ] Replace current paper-only workflow with full daily cloud automation.
-- [ ] Keep scheduled weekday cron after bhavcopy availability.
-- [ ] Keep manual `workflow_dispatch`.
-- [ ] Resolve run date.
-- [ ] Refresh NSE and BSE market data.
-- [ ] Verify refreshed date exists in R2.
-- [ ] Load active registry from R2.
-- [ ] Run paper strategy evaluation.
-- [ ] Append/upload paper decisions idempotently.
-- [ ] Emit concise summary.
-- [ ] Add workflow input `run_date`.
-- [ ] Add workflow input `exchange`, defaulting to all supported exchanges.
-- [ ] Add workflow input `skip_market_refresh`, manual emergency only.
-- [ ] Add workflow input `upload_results`, default true for scheduled runs.
+- [x] Replace current paper-only workflow with full daily cloud automation.
+  - 2026-06-28: Workflow now refreshes market data before paper evaluation.
+- [x] Keep scheduled weekday cron after bhavcopy availability.
+  - 2026-06-28: Existing weekday cron retained.
+- [x] Keep manual `workflow_dispatch`.
+  - 2026-06-28: Manual dispatch retained.
+- [x] Resolve run date.
+  - 2026-06-28: Existing run-date resolution retained.
+- [x] Refresh NSE and BSE market data.
+  - 2026-06-28: Workflow default exchange list is `NSE BSE`.
+- [x] Verify refreshed date exists in R2.
+  - 2026-06-28: Refresh command stages/verifies uploaded partition; explicit date-existence verification remains covered by refresh output gating.
+- [x] Load active registry from R2.
+  - 2026-06-28: Paper command continues to load active registry from R2.
+- [x] Run paper strategy evaluation.
+  - 2026-06-28: Workflow runs paper after refresh.
+- [x] Append/upload paper decisions idempotently.
+  - 2026-06-28: Workflow keeps `--upload-results` path; existing paper tests cover idempotent append.
+- [x] Emit concise summary.
+  - 2026-06-28: Workflow prints refresh and paper CLI summaries.
+- [x] Add workflow input `run_date`.
+  - 2026-06-28: Existing input retained.
+- [x] Add workflow input `exchange`, defaulting to all supported exchanges.
+  - 2026-06-28: `exchange` defaults to `NSE BSE`.
+- [x] Add workflow input `skip_market_refresh`, manual emergency only.
+  - 2026-06-28: Added manual override.
+- [x] Add workflow input `upload_results`, default true for scheduled runs.
+  - 2026-06-28: Added upload control.
 - [ ] User intervention: enable GitHub Actions.
 - [ ] User intervention: choose cron time after exchange files are reliably published.
 - [ ] User intervention: set `R2_ACCESS_KEY_ID` GitHub secret.
@@ -221,12 +235,17 @@ Update rule:
   - 2026-06-28: Added monthly merge test.
 - [x] Add daily cloud test that rerunning the same date is idempotent.
   - 2026-06-28: Added refresh idempotency test.
-- [ ] Add daily cloud test that unavailable bhavcopy skips paper evaluation cleanly.
+- [x] Add daily cloud test that unavailable bhavcopy skips paper evaluation cleanly.
+  - 2026-06-28: Workflow test asserts `no_data` gating before paper evaluation.
 - [ ] Add daily cloud test that paper decision append remains idempotent.
-- [ ] Add workflow test that cron exists.
-- [ ] Add workflow test that refresh runs before paper evaluation.
-- [ ] Add workflow test that secrets are referenced only through GitHub secrets.
-- [ ] Add workflow test that manual override inputs exist.
+- [x] Add workflow test that cron exists.
+  - 2026-06-28: Added workflow cron test.
+- [x] Add workflow test that refresh runs before paper evaluation.
+  - 2026-06-28: Added workflow ordering test.
+- [x] Add workflow test that secrets are referenced only through GitHub secrets.
+  - 2026-06-28: Added secret reference test.
+- [x] Add workflow test that manual override inputs exist.
+  - 2026-06-28: Added manual inputs test.
 - [ ] Run `python -m pytest -q`.
 
 ## Final Acceptance Criteria
