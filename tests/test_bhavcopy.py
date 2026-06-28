@@ -229,6 +229,18 @@ def test_normalize_bhavcopy_inputs_truncates_ragged_csv_lines(tmp_path) -> None:
     assert frame.get_column("close").to_list() == [100.5]
 
 
+def test_normalize_bhavcopy_inputs_rejects_short_ragged_market_rows(tmp_path) -> None:
+    source = tmp_path / "EQ030126_CSV.ZIP"
+    header = "SC_CODE,SC_NAME,SC_GROUP,OPEN,HIGH,LOW,CLOSE,PREVCLOSE,NO_TRADES,NO_OF_SHRS,NET_TURNOV,DATE\n"
+    row = "500001,BSE DEMO,A,100,101,99,100.5,98,100,1000,100500,2026-01-03\n"
+    short_row = "500002,BSE SHORT,A,90,91,89\n"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("EQ030126.CSV", header + row + short_row)
+
+    with pytest.raises(ValueError, match="incomplete market rows"):
+        normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+
 def test_normalize_bse_udiff_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
     source = tmp_path / "BhavCopy_BSE_CM_0_0_0_20240730_F_0000.CSV"
     source.write_text(_bhavcopy_csv([_bse_udiff_row()]), encoding="utf-8")

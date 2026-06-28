@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from time import sleep
 from urllib.error import HTTPError, URLError
@@ -217,6 +218,28 @@ def _resolve_bhavcopy_inputs(input_path: str | Path) -> list[Path]:
     return files
 
 
+def _read_csv_payload(payload: BytesIO | Path) -> pl.DataFrame:
+    try:
+        return pl.read_csv(payload, ignore_errors=False, truncate_ragged_lines=True)
+    except pl.exceptions.ComputeError:
+        raw = payload.read_text(encoding="utf-8", errors="replace") if isinstance(payload, Path) else payload.getvalue().decode(
+            "utf-8",
+            errors="replace",
+        )
+        reader = csv.reader(StringIO(raw))
+        rows = list(reader)
+        if not rows:
+            raise ValueError("Bhavcopy CSV is empty.")
+        header = rows[0]
+        width = len(header)
+        normalized_rows = [
+            row[:width] + [""] * max(0, width - len(row))
+            for row in rows[1:]
+            if row and any(cell.strip() for cell in row)
+        ]
+        return pl.DataFrame(normalized_rows, schema=header, orient="row", strict=False)
+
+
 def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
     if path.suffix.lower() == ".zip":
         with ZipFile(path) as archive:
@@ -224,9 +247,9 @@ def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
             if not csv_names:
                 raise ValueError(f"Bhavcopy archive has no CSV file: {path}")
             payload = archive.read(csv_names[0])
-        frame = pl.read_csv(BytesIO(payload), ignore_errors=False, truncate_ragged_lines=True)
+        frame = _read_csv_payload(BytesIO(payload))
     else:
-        frame = pl.read_csv(path, ignore_errors=False, truncate_ragged_lines=True)
+        frame = _read_csv_payload(path)
 
     return frame.rename(
         {
@@ -283,7 +306,7 @@ def normalize_bhavcopy_frame(frame: pl.DataFrame, *, exchange: str) -> pl.DataFr
     series = _column_expr(frame, "SERIES", "SCTYSRS", "SCGROUP", default=pl.lit("EQ"))
     vwap = _vwap_expr(turnover, volume, _column_expr(frame, "VWAP", "AVGPERIC", default=pl.lit(None)))
 
-    return frame.select(
+    normalized = frame.select(
         _parse_bhavcopy_date(timestamp).alias("date"),
         pl.lit(exchange).alias("exchange"),
         isin.cast(pl.Utf8).alias("isin"),
@@ -316,11 +339,29 @@ def normalize_bhavcopy_frame(frame: pl.DataFrame, *, exchange: str) -> pl.DataFr
         close.cast(pl.Float64).alias("adj_close"),
         pl.lit(1.0).alias("adj_factor"),
     )
+    return normalized.filter(
+        pl.col("date").is_not_null()
+        & pl.col("isin").is_not_null()
+        & pl.col("symbol").is_not_null()
+        & pl.col("close").is_not_null()
+        & pl.col("volume").is_not_null()
+    )
 
 
 def normalize_bhavcopy_file(path: str | Path, *, exchange: str) -> pl.DataFrame:
     """Normalize one raw exchange bhavcopy file into canonical daily stock data."""
-    return normalize_bhavcopy_frame(_read_bhavcopy_file(Path(path)), exchange=exchange)
+    source = Path(path)
+    try:
+        raw = _read_bhavcopy_file(source)
+        normalized = normalize_bhavcopy_frame(raw, exchange=exchange)
+        if normalized.height != raw.height:
+            raise ValueError(
+                f"normalized row count {normalized.height} differs from raw row count {raw.height}; "
+                "source contains incomplete market rows"
+            )
+        return normalized
+    except Exception as exc:
+        raise ValueError(f"Failed to normalize bhavcopy file {source}: {exc}") from exc
 
 
 def normalize_bhavcopy_inputs(input_path: str | Path, *, exchange: str) -> pl.DataFrame:
