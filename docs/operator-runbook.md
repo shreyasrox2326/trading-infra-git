@@ -36,8 +36,9 @@ python -m trading_infra history-fetch \
   --start-date 1994-01-01 \
   --end-date YYYY-MM-DD \
   --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
-  --workers 8 \
-  --retries 3 \
+  --workers 1 \
+  --retries 5 \
+  --retry-sleep-seconds 60 \
   --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
 
 python -m trading_infra history-fetch \
@@ -50,7 +51,13 @@ python -m trading_infra history-fetch \
   --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-bse.log
 ```
 
-`history-fetch` is resumable by default: existing files are skipped unless `--overwrite` is passed. It uses a progress bar by default; use `--no-progress` only for non-interactive logging.
+`history-fetch` is resumable by default: existing files are skipped unless `--overwrite` is passed. It uses a progress bar by default; use `--no-progress` only for non-interactive logging. The fetch log is appended and flushed as each date completes, so it can be monitored while the command is running:
+
+```bash
+tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
+```
+
+For NSE, `rate_limited` means the official archive returned HTTP 403. Stop the run, wait before retrying, and resume with low concurrency; do not continue a full-range run that is logging only `rate_limited` rows.
 
 Build one canonical parquet locally:
 

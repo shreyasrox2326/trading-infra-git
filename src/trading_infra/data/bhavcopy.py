@@ -160,6 +160,7 @@ def fetch_bhavcopy_archive(
 
     attempts = max(1, retries + 1)
     last_error = ""
+    saw_forbidden = False
     for attempt in range(1, attempts + 1):
         for url in bhavcopy_archive_urls(trade_date, exchange=exchange):
             request = Request(
@@ -183,6 +184,8 @@ def fetch_bhavcopy_archive(
                 if exc.code == 404:
                     last_error = str(exc)
                     continue
+                if exc.code == 403:
+                    saw_forbidden = True
                 last_error = str(exc)
             except URLError as exc:
                 last_error = str(exc)
@@ -192,6 +195,8 @@ def fetch_bhavcopy_archive(
 
     if last_error.startswith("HTTP Error 404") or last_error == "HTML response instead of bhavcopy data.":
         return BhavcopyFetchResult(trade_date, "not_available", None, last_error)
+    if saw_forbidden:
+        return BhavcopyFetchResult(trade_date, "rate_limited", None, last_error)
     return BhavcopyFetchResult(trade_date, "failed", None, last_error)
 
 
@@ -204,6 +209,7 @@ def fetch_bhavcopy_archives(
     overwrite: bool = False,
     workers: int = 1,
     retries: int = 3,
+    retry_sleep_seconds: float = 1.0,
     timeout_seconds: int = 30,
     show_progress: bool = False,
     on_result: Callable[[BhavcopyFetchResult], None] | None = None,
@@ -219,6 +225,7 @@ def fetch_bhavcopy_archives(
             overwrite=overwrite,
             timeout_seconds=timeout_seconds,
             retries=retries,
+            retry_sleep_seconds=retry_sleep_seconds,
         )
 
     if workers <= 1:

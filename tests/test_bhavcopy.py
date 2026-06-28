@@ -216,6 +216,24 @@ def test_fetch_nse_legacy_bhavcopy_archive_tries_mirror_after_primary_error(monk
     assert result.path.read_bytes() == b"payload"
 
 
+def test_fetch_nse_legacy_bhavcopy_archive_reports_rate_limit(monkeypatch, tmp_path) -> None:
+    from urllib.error import HTTPError
+
+    requested_urls = []
+
+    def fake_urlopen(request, **_kwargs):
+        requested_urls.append(request.full_url)
+        raise HTTPError(request.full_url, 403, "Forbidden", hdrs=None, fp=None)
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", fake_urlopen)
+
+    result = fetch_bhavcopy_archive(date(2000, 1, 11), output_path=tmp_path, retries=0)
+
+    assert result.status == "rate_limited"
+    assert result.path is None
+    assert requested_urls == bhavcopy_archive_urls(date(2000, 1, 11), exchange="NSE")
+
+
 def test_fetch_bhavcopy_archives_parallel_preserves_date_order(monkeypatch, tmp_path) -> None:
     class _Response:
         def __enter__(self):

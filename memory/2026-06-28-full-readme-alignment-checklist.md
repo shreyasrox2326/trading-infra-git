@@ -37,6 +37,7 @@ Update rule:
   - 2026-06-28: Added exchange-aware `history-fetch`.
   - 2026-06-28: Optimized with bounded workers, retries, progress bar, resumability, and log output for long runs.
   - 2026-06-28: Live smoke confirmed `2015-12-31` downloads and normalizes successfully from official NSE archives.
+  - 2026-06-28: All-host NSE HTTP 403 responses are now logged as `rate_limited`; runbook recommends low-concurrency NSE resume settings.
 - [x] Add local-only `history-fetch` command for BSE full-history raw bhavcopy download.
   - 2026-06-28: Added exchange-aware `history-fetch`.
   - 2026-06-28: Optimized with bounded workers, retries, progress bar, resumability, and log output for long runs.
