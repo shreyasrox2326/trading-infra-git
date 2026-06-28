@@ -78,17 +78,28 @@ Update rule:
 
 ## Stage 4: One-Time Clean R2 Historical Upload
 
-- [ ] Add `history-upload` command with `--path`, `--audit-path`, and one or more `--exchange` values.
-- [ ] Refuse upload unless verification passed.
-- [ ] Write monthly canonical partitions locally before upload.
-- [ ] Upload to temporary R2 staging prefix such as `_staging/history-load/<run_id>/...`.
-- [ ] Verify staged uploaded object sizes/checksums/counts against the local partition plan.
-- [ ] Promote staged data to canonical `data/daily_stock_data/exchange=.../year=.../month=.../part.parquet` only after staging verification passes.
-- [ ] Write R2 manifest such as `data/daily_stock_data/_manifest.json`.
-- [ ] Ensure upload never runs directly from raw files.
-- [ ] Ensure unverified input cannot rewrite canonical R2 partitions.
-- [ ] Ensure old canonical data is not deleted until staged upload verification passes.
-- [ ] Ensure failed upload leaves canonical R2 unchanged.
+- [x] Add `history-upload` command with `--path`, `--audit-path`, and one or more `--exchange` values.
+  - 2026-06-28: Added `history-upload`.
+- [x] Refuse upload unless verification passed.
+  - 2026-06-28: Upload helper requires passing audit JSON.
+- [x] Write monthly canonical partitions locally before upload.
+  - 2026-06-28: Upload helper writes local monthly partition files from canonical parquet.
+- [x] Upload to temporary R2 staging prefix such as `_staging/history-load/<run_id>/...`.
+  - 2026-06-28: Upload helper stages under `_staging/history-load/<run_id>/`.
+- [x] Verify staged uploaded object sizes/checksums/counts against the local partition plan.
+  - 2026-06-28: Staged objects are downloaded and size-checked before promotion.
+- [x] Promote staged data to canonical `data/daily_stock_data/exchange=.../year=.../month=.../part.parquet` only after staging verification passes.
+  - 2026-06-28: Promotion happens after all staging checks pass.
+- [x] Write R2 manifest such as `data/daily_stock_data/_manifest.json`.
+  - 2026-06-28: Upload helper writes manifest JSON.
+- [x] Ensure upload never runs directly from raw files.
+  - 2026-06-28: Upload requires canonical parquet and passing audit.
+- [x] Ensure unverified input cannot rewrite canonical R2 partitions.
+  - 2026-06-28: Failed audit test verifies no R2 writes.
+- [x] Ensure old canonical data is not deleted until staged upload verification passes.
+  - 2026-06-28: Staging verification precedes canonical promotion and stale cleanup.
+- [x] Ensure failed upload leaves canonical R2 unchanged.
+  - 2026-06-28: Failed audit path leaves R2 untouched.
 - [ ] User intervention: confirm R2 credentials are configured locally.
 - [ ] User intervention: confirm staged upload looks correct.
 - [ ] User intervention: approve final promotion from staging to canonical prefix.
@@ -186,10 +197,13 @@ Update rule:
 - [ ] Add verification test for bad schema failure.
 - [x] Add verification test for valid audit report generation.
   - 2026-06-28: Added JSON and Markdown audit output test.
-- [ ] Add upload safety test that refuses upload without passing audit.
-- [ ] Add upload safety test that uploads staging first.
+- [x] Add upload safety test that refuses upload without passing audit.
+  - 2026-06-28: Added failed-audit test.
+- [x] Add upload safety test that uploads staging first.
+  - 2026-06-28: Added staged upload order assertion.
 - [ ] Add upload safety test that does not modify canonical R2 on staging failure.
-- [ ] Add upload safety test that promotes only after verification.
+- [x] Add upload safety test that promotes only after verification.
+  - 2026-06-28: Added staging-before-canonical promotion test.
 - [ ] Add daily cloud test that refresh merges one date without deleting rest of month.
 - [ ] Add daily cloud test that rerunning the same date is idempotent.
 - [ ] Add daily cloud test that unavailable bhavcopy skips paper evaluation cleanly.

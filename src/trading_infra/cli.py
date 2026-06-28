@@ -18,6 +18,7 @@ from trading_infra.registry import load_strategy_registry
 from trading_infra.storage.decisions import read_decisions_parquet
 from trading_infra.storage.decisions import write_decisions_parquet
 from trading_infra.storage.market_data import list_market_data_partitions, upload_market_data_partitions
+from trading_infra.storage.history import upload_verified_history
 from trading_infra.storage.remote import (
     download_strategy_artifacts,
     upload_backtest_decisions,
@@ -102,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
     history_verify = subparsers.add_parser("history-verify", help="Verify canonical full-history market-data parquet.")
     history_verify.add_argument("--path", required=True)
     history_verify.add_argument("--report-path", required=True)
+
+    history_upload = subparsers.add_parser("history-upload", help="Upload verified full-history market data to R2.")
+    history_upload.add_argument("--path", required=True)
+    history_upload.add_argument("--audit-path", required=True)
+    history_upload.add_argument("--exchange", action="append")
 
     return parser
 
@@ -342,6 +348,23 @@ def history_verify(args: argparse.Namespace) -> int:
     return 0 if audit["passed"] else 1
 
 
+def history_upload(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    results = upload_verified_history(
+        client,
+        path=args.path,
+        audit_path=args.audit_path,
+        exchanges=args.exchange,
+    )
+    print(f"history-upload path={args.path} audit_path={args.audit_path} partitions={len(results)}")
+    for result in results:
+        print(
+            f"{result.exchange} year={result.year} month={result.month:02d} rows={result.rows} "
+            f"staging_key={result.staging_key} canonical_key={result.canonical_key}"
+        )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -368,5 +391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_build(args)
     if args.command == "history-verify":
         return history_verify(args)
+    if args.command == "history-upload":
+        return history_upload(args)
     parser.error(f"Unsupported command: {args.command}")
     return 2
