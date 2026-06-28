@@ -73,6 +73,31 @@ def _udiff_row(symbol: str = "ABC", isin: str = "INE000000001") -> dict:
     }
 
 
+def _bse_legacy_row() -> dict:
+    return {
+        "SC_CODE": "500001",
+        "SC_NAME": "BSE DEMO",
+        "SC_GROUP": "A",
+        "SC_TYPE": "Q",
+        "OPEN": 100.0,
+        "HIGH": 101.0,
+        "LOW": 99.0,
+        "CLOSE": 100.5,
+        "LAST": 100.5,
+        "PREVCLOSE": 98.0,
+        "NO_TRADES": 100,
+        "NO_OF_SHRS": 1000,
+        "NET_TURNOV": 100500.0,
+        "TDCLOINDI": "",
+    }
+
+
+def _bse_udiff_row() -> dict:
+    row = _udiff_row(symbol="BSEABC", isin="INE000000002")
+    row["Src"] = "BSE"
+    return row
+
+
 def test_trading_weekdays_skips_weekends() -> None:
     days = trading_weekdays(date(2026, 1, 2), date(2026, 1, 5))
 
@@ -84,6 +109,14 @@ def test_bhavcopy_archive_name_switches_to_udiff_from_2024_07_08() -> None:
     assert bhavcopy_archive_name(date(2024, 7, 8)) == "BhavCopy_NSE_CM_0_0_0_20240708_F_0000.csv.zip"
     assert bhavcopy_archive_url(date(2024, 7, 8)).endswith(
         "/content/cm/BhavCopy_NSE_CM_0_0_0_20240708_F_0000.csv.zip"
+    )
+
+
+def test_bse_bhavcopy_archive_names_support_legacy_and_udiff() -> None:
+    assert bhavcopy_archive_name(date(2024, 7, 29), exchange="BSE") == "EQ290724_CSV.ZIP"
+    assert bhavcopy_archive_name(date(2024, 7, 30), exchange="BSE") == "BhavCopy_BSE_CM_0_0_0_20240730_F_0000.CSV"
+    assert bhavcopy_archive_url(date(2024, 7, 30), exchange="BSE").endswith(
+        "/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_20240730_F_0000.CSV"
     )
 
 
@@ -133,6 +166,35 @@ def test_normalize_udiff_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
     assert frame.get_column("series").to_list() == ["EQ"]
     assert frame.get_column("vwap").to_list() == [100.5]
     assert frame.get_column("trades").to_list() == [100]
+
+
+def test_normalize_bse_legacy_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
+    source = tmp_path / "EQ020126_CSV.ZIP"
+    row = _bse_legacy_row()
+    row["DATE"] = "2026-01-02"
+    _write_bhavcopy_zip(source, [row])
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+    assert frame.columns == list(DAILY_STOCK_DATA_COLUMNS)
+    assert frame.get_column("date").to_list() == [date(2026, 1, 2)]
+    assert frame.get_column("exchange").to_list() == ["BSE"]
+    assert frame.get_column("isin").to_list() == ["500001"]
+    assert frame.get_column("symbol").to_list() == ["500001"]
+    assert frame.get_column("trades").to_list() == [100]
+    assert frame.get_column("adj_factor").to_list() == [1.0]
+
+
+def test_normalize_bse_udiff_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
+    source = tmp_path / "BhavCopy_BSE_CM_0_0_0_20240730_F_0000.CSV"
+    source.write_text(_bhavcopy_csv([_bse_udiff_row()]), encoding="utf-8")
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+    assert frame.columns == list(DAILY_STOCK_DATA_COLUMNS)
+    assert frame.get_column("date").to_list() == [date(2024, 7, 9)]
+    assert frame.get_column("exchange").to_list() == ["BSE"]
+    assert frame.get_column("symbol").to_list() == ["BSEABC"]
 
 
 def test_normalize_bhavcopy_inputs_handles_two_digit_years(tmp_path) -> None:

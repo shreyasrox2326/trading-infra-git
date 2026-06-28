@@ -1,4 +1,4 @@
-"""Fetch and normalize NSE equity bhavcopy files."""
+"""Fetch and normalize exchange equity bhavcopy files."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, DAILY_STOCK
 NSE_ARCHIVE_BASE_URL = "https://archives.nseindia.com/content/historical/EQUITIES"
 NSE_UDIFF_BASE_URL = "https://archives.nseindia.com/content/cm"
 NSE_UDIFF_START_DATE = date(2024, 7, 8)
+BSE_ARCHIVE_BASE_URL = "https://www.bseindia.com/download/BhavCopy/Equity"
+BSE_UDIFF_START_DATE = date(2024, 7, 30)
 NSE_MONTHS = {
     1: "JAN",
     2: "FEB",
@@ -57,22 +59,40 @@ class BhavcopyIngestSummary:
     missing_delivery_pct: int
 
 
-def bhavcopy_archive_name(trade_date: date) -> str:
-    """Return the canonical NSE equity bhavcopy archive filename."""
-    if trade_date >= NSE_UDIFF_START_DATE:
-        return f"BhavCopy_NSE_CM_0_0_0_{trade_date:%Y%m%d}_F_0000.csv.zip"
-    month = NSE_MONTHS[trade_date.month]
-    return f"cm{trade_date:%d}{month}{trade_date:%Y}bhav.csv.zip"
+def _normalize_exchange(exchange: str) -> str:
+    normalized = exchange.upper()
+    if normalized not in {"NSE", "BSE"}:
+        raise ValueError(f"Unsupported bhavcopy exchange: {exchange}")
+    return normalized
 
 
-def bhavcopy_archive_url(trade_date: date) -> str:
-    """Return the canonical NSE historical bhavcopy archive URL."""
-    if trade_date >= NSE_UDIFF_START_DATE:
+def bhavcopy_archive_name(trade_date: date, *, exchange: str = "NSE") -> str:
+    """Return the canonical exchange equity bhavcopy filename."""
+    exchange = _normalize_exchange(exchange)
+    if exchange == "NSE":
+        if trade_date >= NSE_UDIFF_START_DATE:
+            return f"BhavCopy_NSE_CM_0_0_0_{trade_date:%Y%m%d}_F_0000.csv.zip"
+        month = NSE_MONTHS[trade_date.month]
+        return f"cm{trade_date:%d}{month}{trade_date:%Y}bhav.csv.zip"
+
+    if trade_date >= BSE_UDIFF_START_DATE:
+        return f"BhavCopy_BSE_CM_0_0_0_{trade_date:%Y%m%d}_F_0000.CSV"
+    return f"EQ{trade_date:%d%m%y}_CSV.ZIP"
+
+
+def bhavcopy_archive_url(trade_date: date, *, exchange: str = "NSE") -> str:
+    """Return the canonical exchange historical bhavcopy URL."""
+    exchange = _normalize_exchange(exchange)
+    if exchange == "NSE" and trade_date >= NSE_UDIFF_START_DATE:
         filename = bhavcopy_archive_name(trade_date)
         return f"{NSE_UDIFF_BASE_URL}/{filename}"
-    month = NSE_MONTHS[trade_date.month]
-    filename = bhavcopy_archive_name(trade_date)
-    return f"{NSE_ARCHIVE_BASE_URL}/{trade_date:%Y}/{month}/{filename}"
+    if exchange == "NSE":
+        month = NSE_MONTHS[trade_date.month]
+        filename = bhavcopy_archive_name(trade_date)
+        return f"{NSE_ARCHIVE_BASE_URL}/{trade_date:%Y}/{month}/{filename}"
+
+    filename = bhavcopy_archive_name(trade_date, exchange=exchange)
+    return f"{BSE_ARCHIVE_BASE_URL}/{filename}"
 
 
 def trading_weekdays(start_date: date, end_date: date) -> list[date]:
@@ -93,18 +113,20 @@ def fetch_bhavcopy_archive(
     trade_date: date,
     *,
     output_path: str | Path,
+    exchange: str = "NSE",
     overwrite: bool = False,
     timeout_seconds: int = 30,
 ) -> BhavcopyFetchResult:
-    """Fetch one NSE equity bhavcopy archive into local operator state."""
+    """Fetch one exchange equity bhavcopy archive into local operator state."""
+    exchange = _normalize_exchange(exchange)
     output_root = Path(output_path)
     output_root.mkdir(parents=True, exist_ok=True)
-    target = output_root / bhavcopy_archive_name(trade_date)
+    target = output_root / bhavcopy_archive_name(trade_date, exchange=exchange)
     if target.exists() and not overwrite:
         return BhavcopyFetchResult(trade_date, "skipped_existing", target)
 
     request = Request(
-        bhavcopy_archive_url(trade_date),
+        bhavcopy_archive_url(trade_date, exchange=exchange),
         headers={
             "User-Agent": "Mozilla/5.0",
             "Accept": "application/zip,text/csv,*/*",
@@ -129,11 +151,17 @@ def fetch_bhavcopy_archives(
     start_date: date,
     end_date: date,
     output_path: str | Path,
+    exchange: str = "NSE",
     overwrite: bool = False,
 ) -> list[BhavcopyFetchResult]:
-    """Fetch NSE equity bhavcopy archives for all weekdays in a date range."""
+    """Fetch exchange equity bhavcopy archives for all weekdays in a date range."""
     return [
-        fetch_bhavcopy_archive(trade_date, output_path=output_path, overwrite=overwrite)
+        fetch_bhavcopy_archive(
+            trade_date,
+            output_path=output_path,
+            exchange=exchange,
+            overwrite=overwrite,
+        )
         for trade_date in trading_weekdays(start_date, end_date)
     ]
 
@@ -166,7 +194,12 @@ def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
     else:
         frame = pl.read_csv(path, ignore_errors=False)
 
-    return frame.rename({column: column.strip().upper().replace(" ", "") for column in frame.columns})
+    return frame.rename(
+        {
+            column: column.strip().upper().replace(" ", "").replace("_", "")
+            for column in frame.columns
+        }
+    )
 
 
 def _column_expr(frame: pl.DataFrame, *names: str, default: pl.Expr | None = None) -> pl.Expr:
@@ -192,8 +225,16 @@ def _parse_bhavcopy_date(expr: pl.Expr) -> pl.Expr:
     return pl.coalesce(iso_date, legacy_date)
 
 
+def _vwap_expr(turnover: pl.Expr, volume: pl.Expr, fallback: pl.Expr | None = None) -> pl.Expr:
+    calculated = turnover.cast(pl.Float64) / volume.cast(pl.Float64)
+    if fallback is None:
+        return calculated
+    return pl.coalesce(fallback.cast(pl.Float64), calculated)
+
+
 def normalize_bhavcopy_inputs(input_path: str | Path, *, exchange: str) -> pl.DataFrame:
-    """Normalize raw NSE bhavcopy files into canonical daily stock data."""
+    """Normalize raw exchange bhavcopy files into canonical daily stock data."""
+    exchange = _normalize_exchange(exchange)
     frames = [_read_bhavcopy_file(path) for path in _resolve_bhavcopy_inputs(input_path)]
     normalized_frames: list[pl.DataFrame] = []
 
@@ -203,34 +244,41 @@ def normalize_bhavcopy_inputs(input_path: str | Path, *, exchange: str) -> pl.Da
         high = _column_expr(frame, "HIGH", "HGHPRIC")
         low = _column_expr(frame, "LOW", "LWPRIC")
         close = _column_expr(frame, "CLOSE", "CLSPRIC")
-        volume = _column_expr(frame, "TOTTRDQTY", "TTL_TRD_QNTY", "VOLUME", "TTLTRADGVOL")
-        turnover = _column_expr(frame, "TOTTRDVAL", "TURNOVER", "TTLTRFVAL")
+        prev_close = _column_expr(frame, "PREVCLOSE", "PRVSCLSGPRIC")
+        volume = _column_expr(frame, "TOTTRDQTY", "TTLTRDQNTY", "NOOFSHRS", "VOLUME", "TTLTRADGVOL")
+        turnover = _column_expr(frame, "TOTTRDVAL", "NETTURNOV", "TURNOVER", "TTLTRFVAL")
+        isin = _column_expr(frame, "ISIN", "SC CODE", "SCCODE", "FININSTRMID")
+        symbol = _column_expr(frame, "SYMBOL", "TCKRSYMB", "SCCODE", "SCNAME", "FININSTRMNM")
+        series = _column_expr(frame, "SERIES", "SCTYSRS", "SCGROUP", default=pl.lit("EQ"))
+        vwap = _vwap_expr(turnover, volume, _column_expr(frame, "VWAP", "AVGPERIC", default=pl.lit(None)))
 
         normalized = frame.select(
             _parse_bhavcopy_date(timestamp).alias("date"),
             pl.lit(exchange).alias("exchange"),
-            _column_expr(frame, "ISIN").cast(pl.Utf8).alias("isin"),
-            _column_expr(frame, "SYMBOL", "TCKRSYMB").cast(pl.Utf8).alias("symbol"),
-            _column_expr(frame, "SERIES", "SCTYSRS", default=pl.lit("EQ")).cast(pl.Utf8).alias("series"),
+            isin.cast(pl.Utf8).alias("isin"),
+            symbol.cast(pl.Utf8).alias("symbol"),
+            series.cast(pl.Utf8).alias("series"),
             open_price.cast(pl.Float64).alias("open"),
             high.cast(pl.Float64).alias("high"),
             low.cast(pl.Float64).alias("low"),
             close.cast(pl.Float64).alias("close"),
-            _column_expr(frame, "PREVCLOSE", "PREV_CLOSE", "PRVSCLSGPRIC").cast(pl.Float64).alias("prev_close"),
-            (turnover.cast(pl.Float64) / volume.cast(pl.Float64)).alias("vwap"),
+            prev_close.cast(pl.Float64).alias("prev_close"),
+            vwap.alias("vwap"),
             volume.cast(pl.Int64).alias("volume"),
             turnover.cast(pl.Float64).alias("turnover"),
             _column_expr(
                 frame,
                 "TOTALTRADES",
+                "NOOFTRADES",
+                "NOTRADES",
                 "TRADES",
                 "TTLNBOFTXSEXCTD",
                 default=pl.lit(None),
             )
             .cast(pl.Int64)
             .alias("trades"),
-            _column_expr(frame, "DELIV_QTY", "DELIVERABLEQTY", default=pl.lit(None)).cast(pl.Int64).alias("deliverable_qty"),
-            _column_expr(frame, "DELIV_PER", "DELIVERYPCT", default=pl.lit(None)).cast(pl.Float64).alias("delivery_pct"),
+            _column_expr(frame, "DELIVQTY", "DELIVERABLEQTY", default=pl.lit(None)).cast(pl.Int64).alias("deliverable_qty"),
+            _column_expr(frame, "DELIVPER", "DELIVERYPCT", default=pl.lit(None)).cast(pl.Float64).alias("delivery_pct"),
             open_price.cast(pl.Float64).alias("adj_open"),
             high.cast(pl.Float64).alias("adj_high"),
             low.cast(pl.Float64).alias("adj_low"),
