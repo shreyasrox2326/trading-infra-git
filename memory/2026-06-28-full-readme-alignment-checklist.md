@@ -21,33 +21,56 @@ Update rule:
 
 ## Stage 2: Local Full-History Assembly
 
-- [ ] Add exchange source adapter for NSE legacy `cmDDMONYYYYbhav.csv.zip`.
-- [ ] Add exchange source adapter for NSE UDiFF/common `BhavCopy_NSE_CM_0_0_0_YYYYMMDD_F_0000.csv.zip`.
-- [ ] Add exchange source adapter for BSE legacy `EQDDMMYY_CSV.ZIP`.
-- [ ] Add exchange source adapter for BSE UDiFF/common `BhavCopy_BSE_CM_0_0_0_YYYYMMDD_F_0000.CSV`.
-- [ ] Add local-only `history-fetch` command for NSE full-history raw bhavcopy download.
-- [ ] Add local-only `history-fetch` command for BSE full-history raw bhavcopy download.
-- [ ] Add local canonical `history-build` command that builds `data/import/daily_stock_data_full.parquet` from raw bhavcopy inputs.
-- [ ] Ensure canonical output matches the README `daily_stock_data` schema.
-- [ ] Apply and document initial identity adjustment policy: `adj_* = raw OHLC`, `adj_factor = 1.0`.
+- [x] Add exchange source adapter for NSE legacy `cmDDMONYYYYbhav.csv.zip`.
+  - 2026-06-28: Existing NSE legacy parser retained and covered by tests.
+- [x] Add exchange source adapter for NSE UDiFF/common `BhavCopy_NSE_CM_0_0_0_YYYYMMDD_F_0000.csv.zip`.
+  - 2026-06-28: Existing NSE UDiFF parser retained and covered by tests.
+- [x] Add exchange source adapter for BSE legacy `EQDDMMYY_CSV.ZIP`.
+  - 2026-06-28: Added BSE legacy filename and normalization support.
+- [x] Add exchange source adapter for BSE UDiFF/common `BhavCopy_BSE_CM_0_0_0_YYYYMMDD_F_0000.CSV`.
+  - 2026-06-28: Added BSE common-format filename and normalization support.
+- [x] Add local-only `history-fetch` command for NSE full-history raw bhavcopy download.
+  - 2026-06-28: Added exchange-aware `history-fetch`.
+- [x] Add local-only `history-fetch` command for BSE full-history raw bhavcopy download.
+  - 2026-06-28: Added exchange-aware `history-fetch`.
+- [x] Add local canonical `history-build` command that builds `data/import/daily_stock_data_full.parquet` from raw bhavcopy inputs.
+  - 2026-06-28: Added `history-build`.
+- [x] Ensure canonical output matches the README `daily_stock_data` schema.
+  - 2026-06-28: Build path casts to canonical schema and tests assert column order.
+- [x] Apply and document initial identity adjustment policy: `adj_* = raw OHLC`, `adj_factor = 1.0`.
+  - 2026-06-28: Parser continues to emit identity adjustment fields.
 
 ## Stage 3: Local Verification Before Any Upload
 
-- [ ] Add `history-verify` command with `--path` and `--report-path`.
-- [ ] Verify exact canonical schema and types.
-- [ ] Verify required non-null columns.
-- [ ] Verify no duplicate `date + exchange + isin + series` keys.
-- [ ] Report date range by exchange.
-- [ ] Report row counts by exchange/year/month.
+- [x] Add `history-verify` command with `--path` and `--report-path`.
+  - 2026-06-28: Added `history-verify`.
+- [x] Verify exact canonical schema and types.
+  - 2026-06-28: Audit detects missing/unexpected columns and casts canonical types.
+- [x] Verify required non-null columns.
+  - 2026-06-28: Audit reports required-null columns.
+- [x] Verify no duplicate `date + exchange + isin + series` keys.
+  - 2026-06-28: Build and audit check duplicate keys.
+- [x] Report date range by exchange.
+  - 2026-06-28: Audit includes exchange-level min/max dates.
+- [x] Report row counts by exchange/year/month.
+  - 2026-06-28: Audit includes exchange/month partition counts.
 - [ ] Report missing trading days summary.
-- [ ] Report null counts for optional fields.
-- [ ] Detect invalid OHLC cases.
-- [ ] Detect negative volume/turnover.
-- [ ] Verify UDiFF/legacy parser boundary coverage.
-- [ ] Generate canonical full parquet.
-- [ ] Generate partition plan.
-- [ ] Generate machine-readable audit JSON.
-- [ ] Generate concise human-readable audit Markdown.
+- [x] Report null counts for optional fields.
+  - 2026-06-28: Audit includes null counts for all canonical columns.
+- [x] Detect invalid OHLC cases.
+  - 2026-06-28: Audit fails invalid OHLC rows.
+- [x] Detect negative volume/turnover.
+  - 2026-06-28: Audit fails negative volume/turnover rows.
+- [x] Verify UDiFF/legacy parser boundary coverage.
+  - 2026-06-28: Tests cover NSE legacy, NSE UDiFF, BSE legacy, and BSE common format.
+- [x] Generate canonical full parquet.
+  - 2026-06-28: `history-build` writes canonical parquet.
+- [x] Generate partition plan.
+  - 2026-06-28: Audit includes exchange/year/month row counts.
+- [x] Generate machine-readable audit JSON.
+  - 2026-06-28: `history-verify` writes JSON.
+- [x] Generate concise human-readable audit Markdown.
+  - 2026-06-28: `history-verify` writes adjacent Markdown summary.
 - [ ] User intervention: inspect audit report.
 - [ ] User intervention: confirm accepted date ranges.
 - [ ] User intervention: confirm whether identity adjustment is acceptable for first upload.
@@ -141,20 +164,28 @@ Update rule:
 
 ## Stage 9: Tests
 
-- [ ] Add parser test for NSE legacy.
-- [ ] Add parser test for NSE UDiFF.
-- [ ] Add parser test for BSE legacy.
-- [ ] Add parser test for BSE UDiFF.
+- [x] Add parser test for NSE legacy.
+  - 2026-06-28: Existing parser test retained.
+- [x] Add parser test for NSE UDiFF.
+  - 2026-06-28: Existing parser test retained.
+- [x] Add parser test for BSE legacy.
+  - 2026-06-28: Added BSE legacy parser test.
+- [x] Add parser test for BSE UDiFF.
+  - 2026-06-28: Added BSE common-format parser test.
 - [ ] Add parser test for missing/holiday files.
-- [ ] Add history build test for canonical schema.
+- [x] Add history build test for canonical schema.
+  - 2026-06-28: Added history build schema test.
 - [ ] Add history build test for duplicate rejection.
 - [ ] Add history build test for nullable delivery fields.
 - [ ] Add history build test for identity adjustment.
-- [ ] Add history build test for multi-exchange output.
+- [x] Add history build test for multi-exchange output.
+  - 2026-06-28: Added NSE+BSE build test.
 - [ ] Add verification test for duplicate key failure.
-- [ ] Add verification test for invalid OHLC failure.
+- [x] Add verification test for invalid OHLC failure.
+  - 2026-06-28: Added invalid OHLC audit test.
 - [ ] Add verification test for bad schema failure.
-- [ ] Add verification test for valid audit report generation.
+- [x] Add verification test for valid audit report generation.
+  - 2026-06-28: Added JSON and Markdown audit output test.
 - [ ] Add upload safety test that refuses upload without passing audit.
 - [ ] Add upload safety test that uploads staging first.
 - [ ] Add upload safety test that does not modify canonical R2 on staging failure.

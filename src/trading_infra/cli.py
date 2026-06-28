@@ -9,6 +9,8 @@ from tempfile import TemporaryDirectory
 from typing import Sequence
 
 from trading_infra.data.bhavcopy import fetch_bhavcopy_archives, write_canonical_bhavcopy_parquet
+from trading_infra.data.history import build_history_parquet, fetch_history_bhavcopies, summarize_history_frame
+from trading_infra.data.history import write_history_audit
 from trading_infra.data.market_data import load_daily_stock_data
 from trading_infra.pipelines.backtest import run_backtest
 from trading_infra.pipelines.paper import run_daily_paper_job, run_daily_paper_job_from_r2
@@ -84,6 +86,22 @@ def build_parser() -> argparse.ArgumentParser:
     bhavcopy_ingest.add_argument("--input-path", required=True)
     bhavcopy_ingest.add_argument("--output-path", required=True)
     bhavcopy_ingest.add_argument("--exchange", default="NSE")
+
+    history_fetch = subparsers.add_parser("history-fetch", help="Fetch full-range exchange bhavcopies locally.")
+    history_fetch.add_argument("--exchange", required=True)
+    history_fetch.add_argument("--start-date", required=True)
+    history_fetch.add_argument("--end-date", required=True)
+    history_fetch.add_argument("--output-path", required=True)
+    history_fetch.add_argument("--overwrite", action="store_true")
+
+    history_build = subparsers.add_parser("history-build", help="Build canonical full-history market-data parquet.")
+    history_build.add_argument("--input-path", required=True)
+    history_build.add_argument("--output-path", required=True)
+    history_build.add_argument("--exchange", action="append")
+
+    history_verify = subparsers.add_parser("history-verify", help="Verify canonical full-history market-data parquet.")
+    history_verify.add_argument("--path", required=True)
+    history_verify.add_argument("--report-path", required=True)
 
     return parser
 
@@ -237,12 +255,11 @@ def market_data_upload(args: argparse.Namespace) -> int:
 
 
 def bhavcopy_fetch(args: argparse.Namespace) -> int:
-    if args.exchange != "NSE":
-        raise ValueError("bhavcopy-fetch currently supports only --exchange NSE.")
     results = fetch_bhavcopy_archives(
         start_date=_parse_date(args.start_date),
         end_date=_parse_date(args.end_date),
         output_path=args.output_path,
+        exchange=args.exchange,
         overwrite=args.overwrite,
     )
     counts: dict[str, int] = {}
@@ -285,6 +302,46 @@ def bhavcopy_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def history_fetch(args: argparse.Namespace) -> int:
+    counts = fetch_history_bhavcopies(
+        exchange=args.exchange,
+        start_date=_parse_date(args.start_date),
+        end_date=_parse_date(args.end_date),
+        output_path=args.output_path,
+        overwrite=args.overwrite,
+    )
+    print(
+        f"history-fetch exchange={args.exchange.upper()} start_date={args.start_date} "
+        f"end_date={args.end_date} output_path={args.output_path} counts={counts}"
+    )
+    return 1 if counts.get("failed", 0) else 0
+
+
+def history_build(args: argparse.Namespace) -> int:
+    output_path, frame = build_history_parquet(
+        input_path=args.input_path,
+        output_path=args.output_path,
+        exchanges=args.exchange,
+    )
+    summary = summarize_history_frame(frame)
+    print(
+        f"history-build input_path={args.input_path} output_path={output_path.as_posix()} "
+        f"rows={summary['rows']} date_min={summary['date_min']} date_max={summary['date_max']} "
+        f"exchanges={summary['exchanges']} symbols={summary['symbols']}"
+    )
+    return 0
+
+
+def history_verify(args: argparse.Namespace) -> int:
+    audit = write_history_audit(path=args.path, report_path=args.report_path)
+    print(
+        f"history-verify path={args.path} report_path={args.report_path} "
+        f"passed={str(audit['passed']).lower()} rows={audit['rows']} "
+        f"duplicate_key_count={audit['duplicate_key_count']} invalid_ohlc_count={audit['invalid_ohlc_count']}"
+    )
+    return 0 if audit["passed"] else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -305,5 +362,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return bhavcopy_fetch(args)
     if args.command == "bhavcopy-ingest":
         return bhavcopy_ingest(args)
+    if args.command == "history-fetch":
+        return history_fetch(args)
+    if args.command == "history-build":
+        return history_build(args)
+    if args.command == "history-verify":
+        return history_verify(args)
     parser.error(f"Unsupported command: {args.command}")
     return 2
