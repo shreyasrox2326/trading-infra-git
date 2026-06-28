@@ -1,6 +1,6 @@
 # Operator Runbook
 
-This runbook covers the steps required to bring the infrastructure to a usable README-ready state.
+This runbook covers local historical data assembly, verified R2 publishing, strategy publishing, and GitHub Actions daily operation.
 
 ## 1. Cloudflare R2 Setup
 
@@ -15,39 +15,110 @@ Record these values:
 - `R2_S3_API`
 - `R2_BUCKET_NAME`
 
-Upload or sync the initial market-data layout:
+Canonical market data on R2 lives under:
 
 ```text
-data/daily_stock_data/exchange=NSE/year=YYYY/month=MM/*.parquet
+data/daily_stock_data/exchange=NSE/year=YYYY/month=MM/part.parquet
+data/daily_stock_data/exchange=BSE/year=YYYY/month=MM/part.parquet
 ```
 
-For one-time historical setup from local canonical parquet files, use:
+Do not upload raw bhavcopy files as canonical R2 market data.
+
+## 2. Local Full-History Bootstrap
+
+Fetch raw bhavcopy files into ignored local operator state:
 
 ```bash
-python -m trading_infra market-data-upload \
-  --path /workspaces/code/trading-infra-git/data/import/full_history.parquet
-```
-
-The command validates the canonical market-data schema, rewrites monthly `exchange/year/month` partitions locally, removes stale parquet objects under each targeted R2 partition prefix, and uploads a single canonical `part.parquet` per partition.
-
-To build canonical parquet from NSE equity bhavcopy archives first:
-
-```bash
-python -m trading_infra bhavcopy-fetch \
+python -m trading_infra history-fetch \
   --exchange NSE \
-  --start-date 2020-01-01 \
-  --end-date 2026-01-31 \
-  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy
+  --start-date 1994-01-01 \
+  --end-date YYYY-MM-DD \
+  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE
 
-python -m trading_infra bhavcopy-ingest \
-  --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
-  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data.parquet \
-  --exchange NSE
+python -m trading_infra history-fetch \
+  --exchange BSE \
+  --start-date 2007-01-01 \
+  --end-date YYYY-MM-DD \
+  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/BSE
 ```
 
-The first ingestion version uses identity adjustment: `adj_open/open`, `adj_high/high`, `adj_low/low`, `adj_close/close`, and `adj_factor=1.0`. Delivery fields may be null when they are not present in the source bhavcopy file.
+Build one canonical parquet locally:
 
-## 2. Local Strategy Preparation
+```bash
+python -m trading_infra history-build \
+  --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
+  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet
+```
+
+Current ingestion uses identity adjustment:
+
+```text
+adj_open=open
+adj_high=high
+adj_low=low
+adj_close=close
+adj_factor=1.0
+```
+
+Delivery fields may be null when the source bhavcopy does not include them.
+
+## 3. Local Verification Before Upload
+
+Verify before any R2 historical replacement:
+
+```bash
+python -m trading_infra history-verify \
+  --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet \
+  --report-path /workspaces/code/trading-infra-git/data/import/history_audit.json
+```
+
+Inspect `history_audit.json` and `history_audit.md`. Confirm:
+
+- audit passed
+- accepted date ranges by exchange
+- row counts by exchange/year/month look reasonable
+- duplicate key count is zero
+- invalid OHLC count is zero
+- negative volume/turnover counts are zero
+- identity adjustment is acceptable for this load
+
+User approval is required before replacing or extending canonical R2 historical market data.
+
+## 4. One-Time Verified R2 Historical Upload
+
+Upload only after local verification passes:
+
+```bash
+python -m trading_infra history-upload \
+  --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full.parquet \
+  --audit-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
+  --exchange NSE \
+  --exchange BSE
+```
+
+The upload path writes monthly canonical partitions locally, uploads them to `_staging/history-load/<run_id>/...`, verifies staged object sizes, then promotes canonical `part.parquet` files under `data/daily_stock_data/`. A manifest is written to `data/daily_stock_data/_manifest.json`.
+
+Use `market-data-upload` only for explicit operator-controlled canonical parquet uploads. The full historical bootstrap should use `history-upload`.
+
+## 5. Daily Market-Data Refresh
+
+Refresh one exchange/date into its affected monthly R2 partition:
+
+```bash
+python -m trading_infra market-data-refresh \
+  --date YYYY-MM-DD \
+  --exchange NSE
+
+python -m trading_infra market-data-refresh \
+  --date YYYY-MM-DD \
+  --exchange BSE
+```
+
+The refresh command fetches only the requested date, normalizes it to the canonical schema, downloads only the affected R2 month, merges and deduplicates by `date + exchange + isin + series`, stages the monthly parquet, then promotes `part.parquet`.
+
+If the exchange file is unavailable, the command reports `status=no_data` and exits successfully so holidays do not fail the workflow.
+
+## 6. Local Strategy Preparation
 
 Create a versioned local strategy folder under `strategies/<strategy_id>/` only when preparing a new strategy version for first upload to R2.
 
@@ -60,7 +131,7 @@ For the current supported strategy type, use the example in `examples/strategies
 
 After the strategy version is uploaded, treat R2 as the canonical source. Local `strategies/`, `registry/`, and `decisions/` directories are workspace/cache state only.
 
-## 3. Local Backtest
+## 7. Local Backtest
 
 Run a backtest locally:
 
@@ -85,17 +156,9 @@ python -m trading_infra backtest-run \
   --end-date 2026-01-31
 ```
 
-In the R2-backed mode, the CLI downloads strategy artifacts from R2 and loads all available market history up to `end-date` before emitting decisions only for the requested `start-date` to `end-date` window. This preserves warm-up history for blackbox strategies.
+R2-backed mode downloads strategy artifacts from R2 and loads all available market history up to `end-date` before emitting decisions only for the requested window.
 
-If the historical market-data input parquet is very large, do the heavy normalization locally first and then point `market-data-upload` at the resulting canonical parquet file or directory of parquet files.
-
-Inspect the resulting file:
-
-```text
-decisions/backtest/<strategy_id>/decisions.parquet
-```
-
-## 4. Publish To R2
+## 8. Publish Strategies And Decisions To R2
 
 Upload strategy artifacts:
 
@@ -113,8 +176,6 @@ python -m trading_infra backtest-upload \
   --path /workspaces/code/trading-infra-git/decisions/backtest/top_n_adj_close_v1/decisions.parquet
 ```
 
-The upload commands validate and rewrite the local Parquet before publishing, so only canonical registry and decision schemas are stored in R2.
-
 Upload the registry:
 
 ```bash
@@ -122,7 +183,9 @@ python -m trading_infra registry-upload \
   --path /workspaces/code/trading-infra-git/registry/strategies.parquet
 ```
 
-## 5. GitHub Actions Setup
+Upload commands validate and rewrite local Parquet before publishing.
+
+## 9. GitHub Actions Setup
 
 In GitHub repository settings, add these Actions secrets:
 
@@ -135,10 +198,14 @@ Then trigger the `Daily Paper Trading` workflow manually using `workflow_dispatc
 
 Recommended first run inputs:
 
-- `run_date`: a known date with available market data
-- `exchange`: `NSE`
+- `run_date`: a known completed trading date
+- `exchange`: `NSE BSE`
+- `skip_market_refresh`: `false`
+- `upload_results`: `true`
 
-## 6. Validation Checklist
+The scheduled workflow refreshes market data before paper evaluation. If refresh returns `no_data` for an exchange/date, paper evaluation is skipped for that exchange/date.
+
+## 10. Validation Checklist
 
 Run a local R2-backed paper dry-run:
 
@@ -155,11 +222,11 @@ Then verify:
 - registry exists under `registry/strategies.parquet`
 - backtest decisions exist under `decisions/backtest/<strategy_id>/decisions.parquet`
 - paper decisions are created or updated under `decisions/paper/<strategy_id>/decisions.parquet`
-- R2-backed paper runs append to existing `decisions/paper/<strategy_id>/decisions.parquet` history instead of replacing it
+- R2-backed paper runs append to existing paper history instead of replacing it
 - rerunning the same date does not create duplicate paper rows
 
-The R2-backed paper flow also loads all available market history up to the requested date so lookback-dependent strategies receive full context.
+## 11. Current Limitation
 
-## 7. Current Limitation
+The first production-supported strategy type is `top_n_adj_close`.
 
-The first production-supported strategy type is `top_n_adj_close`. Add more strategy builders only after the storage and paper workflow remain stable.
+Optional ML artifacts can be stored and uploaded, but ML strategy execution, feature generation, model loading, and inference contracts are not implemented yet.

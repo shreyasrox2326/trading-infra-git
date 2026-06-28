@@ -27,7 +27,7 @@ Target operating state from the README:
 4. Backtest decisions can be uploaded to R2 as canonical `decisions.parquet`.
 5. A strategy can be activated in the registry.
 6. GitHub Actions can fetch or update daily market data, run active strategies, append daily paper decisions, and upload the updated result.
-7. The full flow works for ML strategies, not only the example `top_n_adj_close` rule strategy.
+7. Optional ML artifacts can be stored; ML execution requires a separate runtime contract before it is considered complete.
 
 ## Phase Checklist
 
@@ -36,18 +36,19 @@ Target operating state from the README:
 - `DONE` README architecture, R2 layout, decision schema, and registry contract are documented.
 - `DONE` Strategy, registry, decision, and market-data upload paths exist.
 - `DONE` R2-backed backtest and paper flows use R2 as the canonical source.
+- `DONE` README and operator docs distinguish local full-history bootstrap, verified R2 upload, daily cloud refresh, and local/cloud compute split.
 
 ### Phase 2: Historical Market Data On R2
 
 - `DONE` Canonical market-data upload command exists: `python -m trading_infra market-data-upload`.
-- `DONE` Upload rewrites canonical `exchange/year/month/part.parquet` partitions and clears stale parquet objects.
-- `DONE` Historical NSE bhavcopy fetch and canonical ingestion commands exist.
-- `DONE` Raw NSE equity bhavcopy archives can be fetched into ignored local operator state.
-- `DONE` Raw NSE equity bhavcopies can be normalized into canonical parquet with identity adjustments.
-- `DONE` R2 contains verified NSE history: 5,786,247 rows, 126 monthly partitions, 2016-01-01 to 2026-06-25.
+- `DONE` Verified full-history upload command exists: `python -m trading_infra history-upload`.
+- `DONE` Historical NSE and BSE bhavcopy fetch/build commands exist.
+- `DONE` Raw NSE and BSE bhavcopy archives can be fetched into ignored local operator state.
+- `DONE` Raw NSE and BSE bhavcopies can be normalized into canonical parquet with identity adjustments.
+- `PARTIAL` R2 currently contains verified NSE history: 5,786,247 rows, 126 monthly partitions, 2016-01-01 to 2026-06-25. Full NSE 1994+ and BSE 2007+ bootstrap still requires local assembly, user audit approval, and one-time verified upload.
 - `PARTIAL` Delivery fields are nullable when the raw bhavcopy source does not include them.
 - `TODO` Corporate-action adjustment data is not integrated.
-- `PARTIAL` The source adapter handles NSE historical and UDiFF bhavcopy files, but daily automated refresh is not wired into GitHub Actions yet.
+- `DONE` The source adapter handles NSE/BSE legacy and UDiFF/common bhavcopy files.
 
 ### Phase 3: Local Strategy Development And Backtest
 
@@ -61,8 +62,8 @@ Target operating state from the README:
 - `DONE` GitHub Actions can run a scheduled or manual R2-backed paper job.
 - `DONE` Paper history append behavior is idempotent and preserves prior history.
 - `DONE` R2-backed paper runs use full prior market history up to the decision date.
-- `PARTIAL` The workflow assumes market data is already updated on R2 before the paper job runs.
-- `TODO` Automated daily market-data fetch/update step is not implemented in the workflow.
+- `DONE` The workflow refreshes market data on R2 before paper evaluation.
+- `DONE` Automated daily market-data refresh is wired into GitHub Actions.
 
 ### Phase 5: ML Strategy Readiness
 
@@ -76,18 +77,18 @@ Target operating state from the README:
 
 These are the active gaps between the documented target state and the current implementation.
 
-1. Daily market-data auto-update is missing.
-   README says GitHub Actions updates latest `daily_stock_data` on R2 before paper decisions. The workflow currently only runs `paper-dry-run --use-r2 --upload-results`.
+1. Full historical bootstrap is not complete on R2.
+   The local build/verify/upload commands exist, but the user still needs to assemble full NSE 1994+ and BSE 2007+ data locally, inspect the audit, and approve the one-time R2 replacement.
 
 2. ML strategy execution is missing.
    The README and strategy contract allow model artifacts, but runtime code only supports `top_n_adj_close`.
 
-3. Daily market-data refresh uses local/operator commands only.
-   Historical R2 data is loaded and verified, but GitHub Actions does not yet fetch the next bhavcopy, ingest it, and upload the updated market-data partition before paper decisions.
+3. Corporate-action adjustment is identity-only.
+   No corporate-action source or back-adjustment method has been selected.
 
 ## Immediate Next Milestones
 
-1. Add GitHub Actions support for daily market-data refresh before paper execution.
-2. Add an ML strategy execution type to `strategy_builder.py` and the runtime contract.
-3. Add an end-to-end ML deployment test:
-   local backtest -> upload strategy/model -> upload backtest decisions -> activate registry -> daily paper run.
+1. Run local full-history NSE+BSE assembly and inspect `history_audit`.
+2. Approve and run one-time verified `history-upload` to replace/extend R2 market data.
+3. Decide corporate-action adjustment source and method.
+4. Add an ML strategy execution type only after defining the feature/model/inference contract.

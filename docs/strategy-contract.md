@@ -48,6 +48,8 @@ Required fields for `top_n_adj_close`:
 
 `metadata.json` is for descriptive information such as version, notes, or strategy name. Execution behavior should live in `config.yaml`.
 
+Storage and upload support optional `model.pkl` and `feature_config.yaml`, but the current runtime does not execute ML strategies. A strategy is runnable only when its `strategy_type` is implemented by `strategy_builder.py`.
+
 ## Registry Contract
 
 The online activation source is:

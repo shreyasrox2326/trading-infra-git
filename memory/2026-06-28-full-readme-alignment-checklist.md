@@ -15,9 +15,12 @@ Update rule:
 
 ## Stage 1: Documentation And Contracts
 
-- [ ] Update `README.md` to distinguish bootstrap historical load, daily cloud maintenance, local research/backtesting/training, R2 storage/source-of-truth role, GitHub Actions cron/compute role, and current/target exchange coverage.
-- [ ] Update `docs/operator-runbook.md` with local full-history build procedure, validation checklist before upload, one-time R2 upload procedure, GitHub Actions daily setup procedure, and recovery steps for failed daily refresh or failed paper run.
-- [ ] Update `docs/strategy-contract.md` and `docs/progress-checklist.md` to track ML artifact storage separately from ML execution, document implemented runtime strategy types only, and track NSE/BSE history coverage, adjustment status, daily automation, and paper evaluation separately.
+- [x] Update `README.md` to distinguish bootstrap historical load, daily cloud maintenance, local research/backtesting/training, R2 storage/source-of-truth role, GitHub Actions cron/compute role, and current/target exchange coverage.
+  - 2026-06-28: README now documents local-first bootstrap and daily GitHub Actions refresh/paper flow.
+- [x] Update `docs/operator-runbook.md` with local full-history build procedure, validation checklist before upload, one-time R2 upload procedure, GitHub Actions daily setup procedure, and recovery steps for failed daily refresh or failed paper run.
+  - 2026-06-28: Runbook replaced with current bootstrap, upload, refresh, and Actions procedure.
+- [x] Update `docs/strategy-contract.md` and `docs/progress-checklist.md` to track ML artifact storage separately from ML execution, document implemented runtime strategy types only, and track NSE/BSE history coverage, adjustment status, daily automation, and paper evaluation separately.
+  - 2026-06-28: Strategy/progress docs now distinguish ML storage from runtime execution and reflect NSE/BSE refresh status.
 
 ## Stage 2: Local Full-History Assembly
 
@@ -174,31 +177,53 @@ Update rule:
 
 ## Stage 7: Strategy And Paper Evaluation Alignment
 
-- [ ] Preserve blackbox strategy contract: input is canonical market data up to date `t`.
-- [ ] Preserve blackbox strategy contract: output is canonical decision rows for date `t`.
-- [ ] Preserve schema symmetry between backtest and paper decisions.
-- [ ] Preserve local/cloud split: local handles research, model training, full historical backtests, parameter sweeps, and strategy uploads.
-- [ ] Preserve local/cloud split: cloud handles daily one-date refresh and active strategy paper evaluation only.
-- [ ] Enforce online strategy constraint: CPU-only.
-- [ ] Enforce online strategy constraint: no online training.
-- [ ] Enforce online strategy constraint: no full historical backtests in GitHub Actions.
-- [ ] Enforce online strategy constraint: no large model inference unless explicitly approved later.
+- [x] Preserve blackbox strategy contract: input is canonical market data up to date `t`.
+  - 2026-06-28: Existing backtest/paper strategy context is unchanged.
+- [x] Preserve blackbox strategy contract: output is canonical decision rows for date `t`.
+  - 2026-06-28: Existing decision validation remains unchanged.
+- [x] Preserve schema symmetry between backtest and paper decisions.
+  - 2026-06-28: Existing shared decision schema remains unchanged.
+- [x] Preserve local/cloud split: local handles research, model training, full historical backtests, parameter sweeps, and strategy uploads.
+  - 2026-06-28: README/runbook document this split; no cloud training/backtest commands added.
+- [x] Preserve local/cloud split: cloud handles daily one-date refresh and active strategy paper evaluation only.
+  - 2026-06-28: Workflow performs one-date refresh plus paper evaluation.
+- [x] Enforce online strategy constraint: CPU-only.
+  - 2026-06-28: Workflow uses standard GitHub Actions Python environment only.
+- [x] Enforce online strategy constraint: no online training.
+  - 2026-06-28: No training command exists in workflow.
+- [x] Enforce online strategy constraint: no full historical backtests in GitHub Actions.
+  - 2026-06-28: Workflow does not run `backtest-run`.
+- [x] Enforce online strategy constraint: no large model inference unless explicitly approved later.
+  - 2026-06-28: ML runtime remains explicitly unimplemented.
 
 ## Stage 8: Performance Requirements
 
-- [ ] Local full-history build uses Polars lazy scans where practical.
-- [ ] Local full-history build batch-parses files.
-- [ ] Local full-history build avoids row-by-row loops over market data.
-- [ ] Local full-history build writes partitioned parquet from canonical frame.
-- [ ] Raw and generated artifacts stay under ignored `data/`.
-- [ ] R2 upload uses verified monthly partition files, not raw data.
-- [ ] R2 upload stages before promotion.
-- [ ] R2 upload keeps logs concise.
-- [ ] R2 upload writes manifest for reproducibility.
-- [ ] Daily cloud fetches one date per exchange.
-- [ ] Daily cloud rewrites only affected monthly partitions.
-- [ ] Daily cloud avoids scanning all history during refresh.
-- [ ] Daily paper evaluation remains CPU-only and bounded by strategy needs.
+- [x] Local full-history build uses Polars lazy scans where practical.
+  - 2026-06-28: History build uses Polars DataFrames and canonical batch transforms.
+- [x] Local full-history build batch-parses files.
+  - 2026-06-28: Normalization reads files into frames and concatenates by exchange.
+- [x] Local full-history build avoids row-by-row loops over market data.
+  - 2026-06-28: Build/verify paths use Polars expressions and aggregations.
+- [x] Local full-history build writes partitioned parquet from canonical frame.
+  - 2026-06-28: Upload path writes monthly partition files from canonical parquet.
+- [x] Raw and generated artifacts stay under ignored `data/`.
+  - 2026-06-28: Runbook commands use ignored `data/raw` and `data/import` paths.
+- [x] R2 upload uses verified monthly partition files, not raw data.
+  - 2026-06-28: `history-upload` requires canonical parquet plus passing audit.
+- [x] R2 upload stages before promotion.
+  - 2026-06-28: Historical upload and daily refresh use staging prefixes.
+- [x] R2 upload keeps logs concise.
+  - 2026-06-28: CLI output is summary-oriented.
+- [x] R2 upload writes manifest for reproducibility.
+  - 2026-06-28: `history-upload` writes `data/daily_stock_data/_manifest.json`.
+- [x] Daily cloud fetches one date per exchange.
+  - 2026-06-28: `market-data-refresh` fetches a single requested date.
+- [x] Daily cloud rewrites only affected monthly partitions.
+  - 2026-06-28: Refresh rewrites only target exchange/year/month.
+- [x] Daily cloud avoids scanning all history during refresh.
+  - 2026-06-28: Refresh downloads only the affected month.
+- [x] Daily paper evaluation remains CPU-only and bounded by strategy needs.
+  - 2026-06-28: Workflow runs Python paper CLI only, after one-date refresh.
 
 ## Stage 9: Tests
 

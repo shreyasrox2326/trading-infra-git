@@ -20,7 +20,12 @@ Primary local CLI entrypoints:
 - `python -m trading_infra paper-dry-run`
 - `python -m trading_infra bhavcopy-fetch`
 - `python -m trading_infra bhavcopy-ingest`
+- `python -m trading_infra history-fetch`
+- `python -m trading_infra history-build`
+- `python -m trading_infra history-verify`
+- `python -m trading_infra history-upload`
 - `python -m trading_infra market-data-upload`
+- `python -m trading_infra market-data-refresh`
 - `python -m trading_infra strategy-upload`
 - `python -m trading_infra registry-upload`
 - `python -m trading_infra backtest-upload`
@@ -58,6 +63,20 @@ R2 stores datasets, strategy files, model files, registries, and decision logs.
 GitHub Actions runs daily jobs and updates online data/results.
 
 The local machine is used for strategy research, training, full backtests, and approved strategy uploads.
+
+The initial historical market-data bootstrap is local-first:
+
+```text
+download raw exchange bhavcopies locally
+    ↓
+build one canonical full-history parquet locally
+    ↓
+verify schema, keys, ranges, counts, and data sanity locally
+    ↓
+upload verified monthly parquet partitions to R2 through staging
+```
+
+After bootstrap, GitHub Actions is the daily cron. It refreshes only the latest exchange bhavcopy date into the affected R2 monthly partition, then runs active paper strategies for that date.
 
 ---
 
@@ -109,6 +128,23 @@ date + exchange + isin + series
 
 Adjusted prices are used for indicators, ML features, and returns.
 
+Current historical ingestion uses identity adjustment until a corporate-action source is selected:
+
+```text
+adj_open   = open
+adj_high   = high
+adj_low    = low
+adj_close  = close
+adj_factor = 1.0
+```
+
+Target free exchange coverage:
+
+- NSE legacy bhavcopy from 1994 onward where public files are available.
+- NSE UDiFF/common bhavcopy from July 2024 onward.
+- BSE legacy bhavcopy from 2007 onward where public files are available.
+- BSE UDiFF/common bhavcopy from July 2024 onward.
+
 ---
 
 ## R2 Folder Shape
@@ -142,7 +178,7 @@ bucket/
     strategies.parquet
 ```
 
-`model.pkl` and `feature_config.yaml` are only needed for ML-based strategies.
+`model.pkl` and `feature_config.yaml` are only needed for ML-based strategies. Storage and upload of these optional artifacts is supported; ML execution is not yet implemented in the runtime contract.
 
 ---
 
@@ -188,6 +224,8 @@ decisions/backtest/strategy_id/decisions.parquet
 
 Performance metrics do not need to be permanently stored initially. They can be computed on demand from decision logs, market data, and strategy behavior.
 
+Full historical backtests, parameter sweeps, model training, and large research jobs stay local. GitHub Actions should not run full backtests, training, or heavy model inference.
+
 ---
 
 ## Daily Online Workflow
@@ -197,7 +235,9 @@ GitHub Actions runs daily after market data is available.
 ```text
 scheduled GitHub Actions job starts
     ↓
-update latest daily_stock_data on R2
+fetch latest exchange bhavcopy for each configured exchange
+    ↓
+merge refreshed date into the affected monthly R2 partition
     ↓
 load active strategies from R2
     ↓
@@ -211,6 +251,8 @@ upload updated decisions to R2
 Daily online computation does **not** rerun full historical backtests.
 
 It only computes the next paper-trading decision for active strategies.
+
+If the exchange bhavcopy is unavailable for a requested date, such as a holiday, the workflow treats the refresh as a no-op and skips paper evaluation for that exchange/date.
 
 ---
 
