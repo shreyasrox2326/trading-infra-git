@@ -139,3 +139,28 @@ def test_upload_verified_history_stages_then_promotes(monkeypatch, tmp_path) -> 
     assert "data/daily_stock_data/exchange=NSE/year=2026/month=01/old.parquet" not in fake.objects
     assert "data/daily_stock_data/_manifest.json" in fake.objects
     assert fake.uploaded_keys[0].startswith("_staging/history-load/test-run/")
+
+
+def test_upload_verified_history_does_not_promote_on_staging_failure(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    history_path = tmp_path / "history.parquet"
+    audit_path = tmp_path / "audit.json"
+    _history_frame().write_parquet(history_path)
+    audit_path.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    client.upload_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet", b"existing")
+
+    def _fail_verify(*_args, **_kwargs):
+        raise ValueError("staging failed")
+
+    monkeypatch.setattr("trading_infra.storage.history._verify_uploaded_size", _fail_verify)
+
+    with pytest.raises(ValueError, match="staging failed"):
+        upload_verified_history(
+            client,
+            path=history_path,
+            audit_path=audit_path,
+            exchanges=["NSE"],
+            run_id="test-run",
+        )
+
+    assert client.download_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet") == b"existing"

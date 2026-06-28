@@ -77,6 +77,44 @@ def test_verify_history_frame_reports_pass_and_exchange_summary(tmp_path) -> Non
     assert audit["passed"] is True
     assert audit["duplicate_key_count"] == 0
     assert audit["by_exchange"][0]["exchange"] == "NSE"
+    assert audit["missing_weekdays_by_exchange"] == {"NSE": []}
+
+
+def test_build_history_parquet_rejects_duplicate_keys(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    duplicate = _nse_row()
+    duplicate["CLOSE"] = 101.0
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [_nse_row(), duplicate])
+
+    try:
+        build_history_parquet(
+            input_path=raw,
+            output_path=tmp_path / "daily_stock_data_full.parquet",
+            exchanges=["NSE"],
+        )
+    except ValueError as exc:
+        assert "duplicate" in str(exc)
+    else:
+        raise AssertionError("Expected duplicate-key failure.")
+
+
+def test_build_history_parquet_preserves_nullable_delivery_and_identity_adjustment(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [_nse_row()])
+
+    _, frame = build_history_parquet(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full.parquet",
+        exchanges=["NSE"],
+    )
+
+    assert frame.get_column("deliverable_qty").null_count() == 1
+    assert frame.get_column("delivery_pct").null_count() == 1
+    assert frame.get_column("adj_open").to_list() == frame.get_column("open").to_list()
+    assert frame.get_column("adj_close").to_list() == frame.get_column("close").to_list()
+    assert frame.get_column("adj_factor").to_list() == [1.0]
 
 
 def test_verify_history_frame_rejects_invalid_ohlc() -> None:
@@ -112,6 +150,13 @@ def test_verify_history_frame_rejects_invalid_ohlc() -> None:
 
     assert audit["passed"] is False
     assert audit["invalid_ohlc_count"] == 1
+
+
+def test_verify_history_frame_rejects_bad_schema() -> None:
+    audit = verify_history_frame(pl.DataFrame([{"date": date(2026, 1, 2), "exchange": "NSE"}]))
+
+    assert audit["passed"] is False
+    assert "isin" in audit["missing_columns"]
 
 
 def test_write_history_audit_writes_json_and_markdown(tmp_path) -> None:

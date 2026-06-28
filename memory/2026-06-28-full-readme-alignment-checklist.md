@@ -57,7 +57,8 @@ Update rule:
   - 2026-06-28: Audit includes exchange-level min/max dates.
 - [x] Report row counts by exchange/year/month.
   - 2026-06-28: Audit includes exchange/month partition counts.
-- [ ] Report missing trading days summary.
+- [x] Report missing trading days summary.
+  - 2026-06-28: Audit reports missing weekdays by exchange.
 - [x] Report null counts for optional fields.
   - 2026-06-28: Audit includes null counts for all canonical columns.
 - [x] Detect invalid OHLC cases.
@@ -238,22 +239,27 @@ Update rule:
 - [ ] Add parser test for missing/holiday files.
 - [x] Add history build test for canonical schema.
   - 2026-06-28: Added history build schema test.
-- [ ] Add history build test for duplicate rejection.
-- [ ] Add history build test for nullable delivery fields.
-- [ ] Add history build test for identity adjustment.
+- [x] Add history build test for duplicate rejection.
+  - 2026-06-28: Added duplicate-key build rejection test.
+- [x] Add history build test for nullable delivery fields.
+  - 2026-06-28: Added nullable delivery field test.
+- [x] Add history build test for identity adjustment.
+  - 2026-06-28: Added identity adjustment test.
 - [x] Add history build test for multi-exchange output.
   - 2026-06-28: Added NSE+BSE build test.
 - [ ] Add verification test for duplicate key failure.
 - [x] Add verification test for invalid OHLC failure.
   - 2026-06-28: Added invalid OHLC audit test.
-- [ ] Add verification test for bad schema failure.
+- [x] Add verification test for bad schema failure.
+  - 2026-06-28: Added bad schema audit failure test.
 - [x] Add verification test for valid audit report generation.
   - 2026-06-28: Added JSON and Markdown audit output test.
 - [x] Add upload safety test that refuses upload without passing audit.
   - 2026-06-28: Added failed-audit test.
 - [x] Add upload safety test that uploads staging first.
   - 2026-06-28: Added staged upload order assertion.
-- [ ] Add upload safety test that does not modify canonical R2 on staging failure.
+- [x] Add upload safety test that does not modify canonical R2 on staging failure.
+  - 2026-06-28: Added staging failure promotion safety test.
 - [x] Add upload safety test that promotes only after verification.
   - 2026-06-28: Added staging-before-canonical promotion test.
 - [x] Add daily cloud test that refresh merges one date without deleting rest of month.

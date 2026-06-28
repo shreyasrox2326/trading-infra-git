@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +98,20 @@ def _json_default(value: Any) -> str:
     return str(value)
 
 
+def _missing_weekdays(dates: list[date]) -> list[str]:
+    if not dates:
+        return []
+    present = set(dates)
+    missing: list[str] = []
+    current = min(present)
+    end = max(present)
+    while current <= end:
+        if current.weekday() < 5 and current not in present:
+            missing.append(current.isoformat())
+        current += timedelta(days=1)
+    return missing
+
+
 def verify_history_frame(frame: pl.DataFrame) -> dict[str, Any]:
     """Return a machine-readable audit for canonical market history."""
     missing = [column for column in DAILY_STOCK_DATA_COLUMNS if column not in frame.columns]
@@ -147,6 +161,7 @@ def verify_history_frame(frame: pl.DataFrame) -> dict[str, Any]:
 
     by_exchange = []
     by_month = []
+    missing_weekdays_by_exchange: dict[str, list[str]] = {}
     if not missing and normalized.height:
         exchange_summary = normalized.group_by("exchange").agg(
             pl.len().alias("rows"),
@@ -166,6 +181,15 @@ def verify_history_frame(frame: pl.DataFrame) -> dict[str, Any]:
             .sort(["exchange", "year", "month"])
         )
         by_month = list(month_summary.iter_rows(named=True))
+        for exchange in normalized.get_column("exchange").unique().sort().to_list():
+            dates = (
+                normalized.filter(pl.col("exchange") == exchange)
+                .get_column("date")
+                .unique()
+                .sort()
+                .to_list()
+            )
+            missing_weekdays_by_exchange[exchange] = _missing_weekdays(dates)
 
     required_null_columns = [column for column in required_non_null if null_counts.get(column, 0) > 0]
     passed = not (
@@ -190,6 +214,7 @@ def verify_history_frame(frame: pl.DataFrame) -> dict[str, Any]:
         "negative_turnover_count": negative_turnover_count,
         "by_exchange": by_exchange,
         "by_month": by_month,
+        "missing_weekdays_by_exchange": missing_weekdays_by_exchange,
         "identity_adjustment": True,
     }
 
@@ -214,6 +239,7 @@ def write_history_audit(*, path: str | Path, report_path: str | Path) -> dict[st
         f"- missing_columns: {audit['missing_columns']}",
         f"- unexpected_columns: {audit['unexpected_columns']}",
         f"- required_null_columns: {audit['required_null_columns']}",
+        f"- missing_weekdays_by_exchange: {audit['missing_weekdays_by_exchange']}",
         "",
         "## By Exchange",
         "",
