@@ -156,7 +156,10 @@ def fetch_bhavcopy_archive(
     output_root.mkdir(parents=True, exist_ok=True)
     target = output_root / bhavcopy_archive_name(trade_date, exchange=exchange)
     if target.exists() and not overwrite:
-        return BhavcopyFetchResult(trade_date, "skipped_existing", target)
+        if target.stat().st_size == 0:
+            target.unlink()
+        else:
+            return BhavcopyFetchResult(trade_date, "skipped_existing", target)
 
     attempts = max(1, retries + 1)
     last_error = ""
@@ -175,6 +178,9 @@ def fetch_bhavcopy_archive(
             try:
                 with urlopen(request, timeout=timeout_seconds) as response:
                     payload = response.read()
+                if not payload:
+                    last_error = "Empty response instead of bhavcopy data."
+                    continue
                 if _looks_like_html(payload):
                     last_error = "HTML response instead of bhavcopy data."
                     continue
@@ -312,6 +318,8 @@ def _read_csv_payload(payload: BytesIO | Path) -> pl.DataFrame:
 
 
 def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
+    if path.stat().st_size == 0:
+        raise NonBhavcopyFileError("Empty file instead of bhavcopy data.")
     if path.suffix.lower() == ".zip":
         if _looks_like_html(path.read_bytes()[:256]):
             raise NonBhavcopyFileError("HTML response instead of bhavcopy ZIP.")

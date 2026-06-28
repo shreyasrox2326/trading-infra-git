@@ -7,6 +7,7 @@ import polars as pl
 import pytest
 
 from trading_infra.data.bhavcopy import (
+    NonBhavcopyFileError,
     bhavcopy_archive_name,
     bhavcopy_archive_url,
     bhavcopy_archive_urls,
@@ -164,6 +165,28 @@ def test_fetch_bhavcopy_archive_without_network(monkeypatch, tmp_path) -> None:
     assert result.path.read_bytes() == b"payload"
 
 
+def test_fetch_bhavcopy_archive_refetches_empty_existing_file(monkeypatch, tmp_path) -> None:
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"payload"
+
+    target = tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
+    target.write_bytes(b"")
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", lambda *_args, **_kwargs: _Response())
+
+    result = fetch_bhavcopy_archive(date(2026, 1, 2), output_path=tmp_path)
+
+    assert result.status == "downloaded"
+    assert result.path == target
+    assert target.read_bytes() == b"payload"
+
+
 def test_fetch_bhavcopy_archive_treats_html_response_as_not_available(monkeypatch, tmp_path) -> None:
     class _Response:
         def __enter__(self):
@@ -182,6 +205,14 @@ def test_fetch_bhavcopy_archive_treats_html_response_as_not_available(monkeypatc
     assert result.status == "not_available"
     assert result.path is None
     assert not (tmp_path / bhavcopy_archive_name(date(2026, 1, 2))).exists()
+
+
+def test_normalize_empty_zip_file_is_non_bhavcopy(tmp_path) -> None:
+    source = tmp_path / "cm06SEP1995bhav.csv.zip"
+    source.write_bytes(b"")
+
+    with pytest.raises(NonBhavcopyFileError):
+        normalize_bhavcopy_inputs(source, exchange="NSE")
 
 
 def test_fetch_nse_legacy_bhavcopy_archive_tries_mirror_after_primary_error(monkeypatch, tmp_path) -> None:

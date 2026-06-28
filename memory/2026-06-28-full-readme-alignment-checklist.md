@@ -47,6 +47,8 @@ Update rule:
   - 2026-06-28: Added `history-build`.
 - [x] Ensure canonical output matches the README `daily_stock_data` schema.
   - 2026-06-28: Build path casts to canonical schema and tests assert column order.
+- [x] Reject empty raw bhavcopy cache files.
+  - 2026-06-28: Zero-byte raw files are no longer skipped as valid cache hits, and leftover empty files are excluded from build inputs.
 - [x] Apply and document initial identity adjustment policy: `adj_* = raw OHLC`, `adj_factor = 1.0`.
   - 2026-06-28: Parser continues to emit identity adjustment fields.
 
