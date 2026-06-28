@@ -210,6 +210,7 @@ def fetch_bhavcopy_archives(
     workers: int = 1,
     retries: int = 3,
     retry_sleep_seconds: float = 1.0,
+    request_sleep_seconds: float = 0.0,
     timeout_seconds: int = 30,
     show_progress: bool = False,
     on_result: Callable[[BhavcopyFetchResult], None] | None = None,
@@ -236,6 +237,8 @@ def fetch_bhavcopy_archives(
             if on_result is not None:
                 on_result(result)
             results.append(result)
+            if request_sleep_seconds > 0:
+                sleep(request_sleep_seconds)
         return results
 
     results_by_date: dict[date, BhavcopyFetchResult] = {}
@@ -250,6 +253,8 @@ def fetch_bhavcopy_archives(
             if on_result is not None:
                 on_result(result)
             results_by_date[trade_date] = result
+            if request_sleep_seconds > 0:
+                sleep(request_sleep_seconds)
 
     return [results_by_date[trade_date] for trade_date in days]
 

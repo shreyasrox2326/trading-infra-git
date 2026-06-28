@@ -105,9 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
     history_fetch.add_argument("--end-date", required=True)
     history_fetch.add_argument("--output-path", required=True)
     history_fetch.add_argument("--overwrite", action="store_true")
-    history_fetch.add_argument("--workers", type=int, default=8)
+    history_fetch.add_argument("--workers", type=int, default=1)
     history_fetch.add_argument("--retries", type=int, default=3)
     history_fetch.add_argument("--retry-sleep-seconds", type=float, default=1.0)
+    history_fetch.add_argument("--request-sleep-seconds", type=float, default=0.0)
     history_fetch.add_argument("--log-path")
     history_fetch.add_argument("--progress", action="store_true", default=True)
     history_fetch.add_argument("--no-progress", dest="progress", action="store_false")
@@ -369,6 +370,7 @@ def history_fetch(args: argparse.Namespace) -> int:
         workers=args.workers,
         retries=args.retries,
         retry_sleep_seconds=args.retry_sleep_seconds,
+        request_sleep_seconds=args.request_sleep_seconds,
         show_progress=args.progress,
         on_result=log_result,
     )
@@ -379,7 +381,7 @@ def history_fetch(args: argparse.Namespace) -> int:
         f"history-fetch exchange={args.exchange.upper()} start_date={args.start_date} "
         f"end_date={args.end_date} output_path={args.output_path} workers={args.workers} "
         f"retries={args.retries} retry_sleep_seconds={args.retry_sleep_seconds} "
-        f"counts={counts} log={log_path.as_posix()}"
+        f"request_sleep_seconds={args.request_sleep_seconds} counts={counts} log={log_path.as_posix()}"
     )
     return 1 if counts.get("failed", 0) or counts.get("rate_limited", 0) else 0
 

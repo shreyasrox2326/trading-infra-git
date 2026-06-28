@@ -30,6 +30,7 @@ This file is the navigation map for repo memory.
 - [NSE pre-2016 fetch fix](logs/2026-06-28-nse-pre2016-fetch-fix.md)
 - [Streaming history fetch log](logs/2026-06-28-streaming-history-fetch-log.md)
 - [NSE rate limit handling](logs/2026-06-28-nse-rate-limit-handling.md)
+- [NSE fetch throttle tuning](logs/2026-06-28-nse-fetch-throttle-tuning.md)
 
 ## Open Questions
 

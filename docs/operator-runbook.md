@@ -39,6 +39,7 @@ python -m trading_infra history-fetch \
   --workers 1 \
   --retries 5 \
   --retry-sleep-seconds 60 \
+  --request-sleep-seconds 1 \
   --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
 
 python -m trading_infra history-fetch \
@@ -57,7 +58,7 @@ python -m trading_infra history-fetch \
 tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
 ```
 
-For NSE, `rate_limited` means the official archive returned HTTP 403. Stop the run, wait before retrying, and resume with low concurrency; do not continue a full-range run that is logging only `rate_limited` rows.
+For NSE, `rate_limited` means the official archive returned HTTP 403. Stop the run, wait before retrying, and resume with low concurrency; do not continue a full-range run that is logging only `rate_limited` rows. NSE-facing bulk fetches should stay conservative: one worker plus roughly one second between requests.
 
 Build one canonical parquet locally:
 
