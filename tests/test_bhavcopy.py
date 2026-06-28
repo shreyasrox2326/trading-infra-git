@@ -216,6 +216,19 @@ def test_normalize_bse_legacy_bhavcopy_inputs_to_canonical_schema(tmp_path) -> N
     assert frame.get_column("adj_factor").to_list() == [1.0]
 
 
+def test_normalize_bhavcopy_inputs_truncates_ragged_csv_lines(tmp_path) -> None:
+    source = tmp_path / "EQ020126_CSV.ZIP"
+    header = "SC_CODE,SC_NAME,SC_GROUP,OPEN,HIGH,LOW,CLOSE,PREVCLOSE,NO_TRADES,NO_OF_SHRS,NET_TURNOV,DATE\n"
+    row = "500001,BSE DEMO,A,100,101,99,100.5,98,100,1000,100500,2026-01-02,EXTRA\n"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("EQ020126.CSV", header + row)
+
+    frame = normalize_bhavcopy_inputs(tmp_path, exchange="BSE")
+
+    assert frame.get_column("symbol").to_list() == ["500001"]
+    assert frame.get_column("close").to_list() == [100.5]
+
+
 def test_normalize_bse_udiff_bhavcopy_inputs_to_canonical_schema(tmp_path) -> None:
     source = tmp_path / "BhavCopy_BSE_CM_0_0_0_20240730_F_0000.CSV"
     source.write_text(_bhavcopy_csv([_bse_udiff_row()]), encoding="utf-8")

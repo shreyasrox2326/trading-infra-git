@@ -224,9 +224,9 @@ def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
             if not csv_names:
                 raise ValueError(f"Bhavcopy archive has no CSV file: {path}")
             payload = archive.read(csv_names[0])
-        frame = pl.read_csv(BytesIO(payload), ignore_errors=False)
+        frame = pl.read_csv(BytesIO(payload), ignore_errors=False, truncate_ragged_lines=True)
     else:
-        frame = pl.read_csv(path, ignore_errors=False)
+        frame = pl.read_csv(path, ignore_errors=False, truncate_ragged_lines=True)
 
     return frame.rename(
         {

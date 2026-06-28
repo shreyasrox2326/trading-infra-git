@@ -24,6 +24,7 @@ This file is the navigation map for repo memory.
 - [Full README alignment implementation](logs/2026-06-28-full-readme-alignment-implementation.md)
 - [History fetch optimization](logs/2026-06-28-history-fetch-optimization.md)
 - [History build optimization](logs/2026-06-28-history-build-optimization.md)
+- [BSE ragged CSV fix](logs/2026-06-28-bse-ragged-csv-fix.md)
 
 ## Open Questions
 
