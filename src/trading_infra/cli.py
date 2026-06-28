@@ -25,6 +25,7 @@ from trading_infra.storage.remote import (
     upload_strategy_artifacts,
     upload_strategy_registry,
 )
+from trading_infra.storage.refresh import refresh_market_data_for_date
 from trading_infra.storage.remote import load_daily_stock_data_history_from_r2
 from trading_infra.storage.r2 import R2Client
 from trading_infra.strategy_builder import build_strategy
@@ -71,6 +72,13 @@ def build_parser() -> argparse.ArgumentParser:
     market_data_upload.add_argument("--path", action="append", required=True)
     market_data_upload.add_argument("--date-from")
     market_data_upload.add_argument("--date-to")
+
+    market_data_refresh = subparsers.add_parser(
+        "market-data-refresh",
+        help="Refresh one exchange/date into its monthly R2 market-data partition.",
+    )
+    market_data_refresh.add_argument("--date", required=True)
+    market_data_refresh.add_argument("--exchange", required=True)
 
     bhavcopy_fetch = subparsers.add_parser("bhavcopy-fetch", help="Fetch NSE equity bhavcopy archives locally.")
     bhavcopy_fetch.add_argument("--exchange", default="NSE")
@@ -260,6 +268,21 @@ def market_data_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def market_data_refresh(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    result = refresh_market_data_for_date(
+        client,
+        exchange=args.exchange,
+        refresh_date=_parse_date(args.date),
+    )
+    print(
+        f"market-data-refresh exchange={result.exchange} date={result.refresh_date} "
+        f"status={result.status} rows={result.rows} staging_key={result.staging_key} "
+        f"canonical_key={result.canonical_key} message={result.message}"
+    )
+    return 1 if result.status == "failed" else 0
+
+
 def bhavcopy_fetch(args: argparse.Namespace) -> int:
     results = fetch_bhavcopy_archives(
         start_date=_parse_date(args.start_date),
@@ -381,6 +404,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return backtest_upload(args)
     if args.command == "market-data-upload":
         return market_data_upload(args)
+    if args.command == "market-data-refresh":
+        return market_data_refresh(args)
     if args.command == "bhavcopy-fetch":
         return bhavcopy_fetch(args)
     if args.command == "bhavcopy-ingest":
