@@ -277,18 +277,23 @@ Update rule:
   - 2026-06-28: Added secret reference test.
 - [x] Add workflow test that manual override inputs exist.
   - 2026-06-28: Added manual inputs test.
-- [ ] Run `python -m pytest -q`.
+- [x] Run `python -m pytest -q`.
+  - 2026-06-28: Full suite passed with 101 tests.
 
 ## Final Acceptance Criteria
 
 - [ ] Local machine can build full canonical NSE+BSE history from raw bhavcopy files.
 - [ ] Local verification produces a passing audit report before upload.
-- [ ] R2 historical market data is uploaded only from verified canonical parquet.
-- [ ] Failed upload cannot corrupt existing canonical R2 data.
+- [x] R2 historical market data is uploaded only from verified canonical parquet.
+  - 2026-06-28: `history-upload` requires canonical parquet plus passing audit.
+- [x] Failed upload cannot corrupt existing canonical R2 data.
+  - 2026-06-28: Staging failure test verifies canonical data is not promoted or overwritten.
 - [ ] GitHub Actions cron maintains daily bhavcopy data on R2.
 - [ ] GitHub Actions runs active paper strategies after successful market-data refresh.
-- [ ] Backtest and paper decisions remain schema-symmetric.
-- [ ] README, docs, memory, code, tests, and workflow all describe the same operating model.
+- [x] Backtest and paper decisions remain schema-symmetric.
+  - 2026-06-28: Shared decision schema was preserved and full tests pass.
+- [x] README, docs, memory, code, tests, and workflow all describe the same operating model.
+  - 2026-06-28: Updated docs, memory checklist/log, implementation, tests, and workflow together.
 
 ## Explicit Deferred Decisions
 
