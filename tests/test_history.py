@@ -482,10 +482,12 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
     assert build_code == 0
     assert verify_code == 0
     assert "history-build" in captured
+    assert "history-build summary_json=" in captured
     assert "workers=2" in captured
     assert "log=" in captured
     assert "manifest=" in captured
     assert "history-verify" in captured
+    assert "history-verify summary_json=" in captured
     assert "verification_mode=partition-wise" in captured
     assert log_path.exists()
     assert "phase=build_start" in log_path.read_text(encoding="utf-8")
@@ -533,6 +535,7 @@ def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, ca
     assert exit_code == 0
     assert "workers=2" in captured
     assert "retries=0" in captured
+    assert "history-fetch summary_json=" in captured
     assert f"manifest={manifest_path.as_posix()}" in captured
     assert log_path.exists()
     assert "2026-01-01,downloaded" in log_path.read_text(encoding="utf-8")

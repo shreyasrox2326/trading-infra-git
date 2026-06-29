@@ -2,6 +2,8 @@
 
 This runbook covers local historical data assembly, verified R2 publishing, strategy publishing, and GitHub Actions daily operation.
 
+Long-running commands emit human-readable progress, a flushed log file where applicable, a machine-readable `summary_json=...` line, and a final `status=ok|warn|fail` line.
+
 ## 1. Cloudflare R2 Setup
 
 Create a private R2 bucket for the project.

@@ -201,13 +201,13 @@ Target files:
 
 ### Phase 9: Logging And Command Output Standards
 
-- `TODO` Adopt the standard Python logging module for long-running commands.
-- `TODO` Add log levels and a consistent event format.
-- `TODO` Ensure each long-running command has a live append-only log file flushed regularly.
-- `TODO` Emit a machine-readable JSON summary at command end.
-- `TODO` Emit a final concise status line with `status=ok|warn|fail`.
-- `TODO` Preserve human progress via `tqdm` or concise progress lines.
-- `TODO` Add tests for JSON summaries/status lines where practical.
+- `DONE` Adopt the standard Python logging module for long-running commands.
+- `DONE` Add log levels and a consistent event format.
+- `DONE` Ensure each long-running command has a live append-only log file flushed regularly.
+- `DONE` Emit a machine-readable JSON summary at command end.
+- `DONE` Emit a final concise status line with `status=ok|warn|fail`.
+- `DONE` Preserve human progress via `tqdm` or concise progress lines.
+- `DONE` Add tests for JSON summaries/status lines where practical.
 
 Target files:
 

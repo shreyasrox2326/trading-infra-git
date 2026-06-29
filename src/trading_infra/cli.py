@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -45,6 +46,16 @@ from trading_infra.storage.sync import check_r2_sync
 from trading_infra.storage.usage import apply_r2_budget, collect_r2_usage, write_r2_usage_snapshot
 from trading_infra.strategy_builder import build_strategy
 from trading_infra.strategy_store import load_stored_strategy
+
+LOGGER = logging.getLogger("trading_infra.cli")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+
+def _emit_summary(command: str, *, status: str, **payload) -> None:
+    summary = {"command": command, "status": status, **payload}
+    LOGGER.info("%s summary status=%s", command, status)
+    print(f"{command} summary_json={json.dumps(summary, default=str, sort_keys=True)}")
+    print(f"{command} status={status}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -476,7 +487,16 @@ def history_fetch(args: argparse.Namespace) -> int:
     )
     if aborted_message:
         print(f"history-fetch status=fail message={aborted_message}")
-    return 1 if aborted_message or counts.get("failed", 0) or counts.get("rate_limited", 0) else 0
+    status = "fail" if aborted_message or counts.get("failed", 0) or counts.get("rate_limited", 0) else "ok"
+    _emit_summary(
+        "history-fetch",
+        status=status,
+        exchange=args.exchange.upper(),
+        counts=counts,
+        log_path=log_path.as_posix(),
+        manifest_path=manifest_path.as_posix(),
+    )
+    return 0 if status == "ok" else 1
 
 
 def history_build(args: argparse.Namespace) -> int:
@@ -506,6 +526,14 @@ def history_build(args: argparse.Namespace) -> int:
         f"repair_partition={repair_partition} log={result.log_path.as_posix()} "
         f"manifest={result.manifest_path.as_posix()}"
     )
+    _emit_summary(
+        "history-build",
+        status="ok",
+        rows=result.rows,
+        partitions=result.partitions,
+        manifest_path=result.manifest_path.as_posix(),
+        log_path=result.log_path.as_posix(),
+    )
     return 0
 
 
@@ -520,6 +548,14 @@ def history_verify(args: argparse.Namespace) -> int:
         f"passed={str(audit['passed']).lower()} rows={audit['rows']} "
         f"partitions={audit['partitions']} verification_mode={audit['verification_mode']} "
         f"duplicate_key_count={audit['duplicate_key_count']} invalid_ohlc_count={audit['invalid_ohlc_count']}"
+    )
+    status = "ok" if audit["passed"] else "fail"
+    _emit_summary(
+        "history-verify",
+        status=status,
+        rows=audit["rows"],
+        partitions=audit["partitions"],
+        report_path=args.report_path,
     )
     return 0 if audit["passed"] else 1
 
@@ -542,6 +578,13 @@ def history_doctor(args: argparse.Namespace) -> int:
         f"parquet_partitions_present={report['parquet_partitions_present']} "
         f"parquet_partitions_missing={len(report['parquet_partitions_missing'])} "
         f"json={result.json_path.as_posix()} markdown={result.markdown_path.as_posix()}"
+    )
+    _emit_summary(
+        "history-doctor",
+        status=report["status"],
+        exchange=report["exchange"],
+        json_path=result.json_path.as_posix(),
+        markdown_path=result.markdown_path.as_posix(),
     )
     return 1 if report["status"] == "fail" else 0
 
@@ -570,6 +613,13 @@ def history_bootstrap(args: argparse.Namespace) -> int:
         f"audit={result.audit_path.as_posix()} partition_manifest={result.partition_manifest_path.as_posix()} "
         f"uploaded_partitions={result.uploaded_partitions}"
     )
+    _emit_summary(
+        "history-bootstrap",
+        status=result.status,
+        exchange=result.exchange,
+        uploaded_partitions=result.uploaded_partitions,
+        steps=result.steps,
+    )
     return 0 if result.status == "ok" else 1
 
 
@@ -596,6 +646,12 @@ def history_upload(args: argparse.Namespace) -> int:
             f"{result.exchange} year={result.year} month={result.month:02d} rows={result.rows} "
             f"staging_key={result.staging_key} canonical_key={result.canonical_key}"
         )
+    _emit_summary(
+        "history-upload",
+        status="ok",
+        partitions=len(results),
+        budget_status=budget["status"],
+    )
     return 0
 
 
