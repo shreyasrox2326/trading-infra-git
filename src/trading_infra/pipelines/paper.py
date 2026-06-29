@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -17,6 +17,7 @@ from trading_infra.storage.remote import (
     download_paper_decisions,
     download_strategy_artifacts,
     load_daily_stock_data_history_from_r2,
+    load_daily_stock_data_range_from_r2,
     load_strategy_registry_from_r2,
     upload_paper_decisions,
 )
@@ -102,11 +103,6 @@ def run_daily_paper_job_from_r2(
     """Run the daily paper workflow using R2-backed inputs."""
     registry = load_strategy_registry_from_r2(client)
     active_ids = active_strategy_ids(registry)
-    market_data = load_daily_stock_data_history_from_r2(
-        client,
-        exchange=exchange,
-        end_date=as_of_date,
-    )
 
     with TemporaryDirectory() as tmpdir:
         workspace = Path(tmpdir)
@@ -114,12 +110,30 @@ def run_daily_paper_job_from_r2(
         registry_root.mkdir(parents=True, exist_ok=True)
         registry.write_parquet(registry_root / "strategies.parquet")
 
+        strategies = {}
         for strategy_id in active_ids:
             download_strategy_artifacts(client, strategy_id, workspace)
+            strategies[strategy_id] = build_strategy(load_stored_strategy(workspace, strategy_id))
             existing = download_paper_decisions(client, strategy_id)
             if not existing.is_empty():
                 decisions_path = workspace / Path(paper_decisions_key(strategy_id))
                 write_decisions_parquet(decisions_path, existing)
+
+        lookbacks = [getattr(strategy, "lookback_days", None) for strategy in strategies.values()]
+        if lookbacks and all(value is not None for value in lookbacks):
+            start_date = as_of_date - timedelta(days=max(int(value) for value in lookbacks))
+            market_data = load_daily_stock_data_range_from_r2(
+                client,
+                exchange=exchange,
+                start_date=start_date,
+                end_date=as_of_date,
+            )
+        else:
+            market_data = load_daily_stock_data_history_from_r2(
+                client,
+                exchange=exchange,
+                end_date=as_of_date,
+            )
 
         results = run_daily_paper_job(
             base_path=workspace,

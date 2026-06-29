@@ -30,6 +30,11 @@ def build_strategy(stored_strategy: StoredStrategy) -> Strategy:
             TopNByAdjustedCloseStrategy(
                 strategy_id=stored_strategy.config.get("strategy_id", stored_strategy.strategy_id),
                 top_n=int(top_n),
+                lookback_days=(
+                    int(stored_strategy.config["lookback_days"])
+                    if stored_strategy.config.get("lookback_days") is not None
+                    else 0
+                ),
             ),
         )
 

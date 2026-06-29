@@ -46,6 +46,12 @@ Required fields for `top_n_adj_close`:
 - `strategy_id`
 - `top_n`
 
+Optional execution fields:
+
+- `lookback_days`
+
+When every active strategy declares a bounded `lookback_days`, R2-backed daily paper runs download only the required market-data date range. If any active strategy does not declare a bounded lookback, the runtime falls back to full available history up to the decision date.
+
 `metadata.json` is for descriptive information such as version, notes, or strategy name. Execution behavior should live in `config.yaml`.
 
 Storage and upload support optional `model.pkl` and `feature_config.yaml`, but the current runtime does not execute ML strategies. A strategy is runnable only when its `strategy_type` is implemented by `strategy_builder.py`.

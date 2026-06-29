@@ -29,6 +29,23 @@ def test_build_strategy_supports_top_n_adj_close() -> None:
 
     assert isinstance(strategy, TopNByAdjustedCloseStrategy)
     assert strategy.top_n == 5
+    assert strategy.lookback_days == 0
+
+
+def test_build_strategy_supports_declared_lookback_days() -> None:
+    strategy = build_strategy(
+        _stored_strategy(
+            {
+                "strategy_type": "top_n_adj_close",
+                "strategy_id": "momentum_v1",
+                "top_n": 5,
+                "lookback_days": 10,
+            }
+        )
+    )
+
+    assert isinstance(strategy, TopNByAdjustedCloseStrategy)
+    assert strategy.lookback_days == 10
 
 
 def test_build_strategy_reads_type_from_metadata() -> None:

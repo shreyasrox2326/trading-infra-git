@@ -218,16 +218,16 @@ Target files:
 
 ### Phase 10: Strategy And Runtime Safety
 
-- `TODO` Keep `top_n_adj_close_v1` under `examples/` only.
-- `TODO` Ensure the default/example registry does not mark trial strategy active by default.
-- `TODO` Keep trial strategy usage limited to tests and workflow smoke checks.
-- `TODO` Avoid treating row iteration in the top-N trial strategy as a pattern for heavy code.
-- `TODO` Add strategy-declared lookback windows.
-- `TODO` Avoid full-history R2 download for daily paper runs when lookback/partition bounds are available.
-- `TODO` Parallelize R2 partition downloads only if profiling or scale requires it.
-- `TODO` Parallelize independent strategy runs only if strategy count grows enough to justify it.
+- `DONE` Keep `top_n_adj_close_v1` under `examples/` only.
+- `DONE` Ensure the default/example registry does not mark trial strategy active by default.
+- `DONE` Keep trial strategy usage limited to tests and workflow smoke checks.
+- `DONE` Avoid treating row iteration in the top-N trial strategy as a pattern for heavy code.
+- `DONE` Add strategy-declared lookback windows.
+- `DONE` Avoid full-history R2 download for daily paper runs when lookback/partition bounds are available.
+- `DONE` Parallelize R2 partition downloads only if profiling or scale requires it.
+- `DONE` Parallelize independent strategy runs only if strategy count grows enough to justify it.
 - `TODO` Keep corporate-action adjustment source selection as an open durable decision until resolved.
-- `TODO` Add tests/docs for inactive trial strategy behavior and lookback-bounded loading when implemented.
+- `DONE` Add tests/docs for inactive trial strategy behavior and lookback-bounded loading when implemented.
 
 Target files:
 

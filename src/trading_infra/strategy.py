@@ -22,6 +22,7 @@ class Strategy(Protocol):
     """Blackbox strategy that emits final decision rows for a date."""
 
     strategy_id: str
+    lookback_days: int | None
 
     def run(self, context: StrategyContext) -> pl.DataFrame:
         """Return decision rows for the requested date."""

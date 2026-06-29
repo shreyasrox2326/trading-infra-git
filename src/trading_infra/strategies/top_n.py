@@ -16,6 +16,7 @@ class TopNByAdjustedCloseStrategy:
 
     strategy_id: str
     top_n: int = 3
+    lookback_days: int | None = 0
 
     def run(self, context: StrategyContext) -> pl.DataFrame:
         current_day = (
