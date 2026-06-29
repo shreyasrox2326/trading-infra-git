@@ -41,6 +41,7 @@ from trading_infra.storage.refresh import refresh_market_data_for_date
 from trading_infra.storage.remote import load_daily_stock_data_history_from_r2
 from trading_infra.storage.r2 import R2Client
 from trading_infra.storage.sync import check_r2_sync
+from trading_infra.storage.usage import apply_r2_budget, collect_r2_usage, write_r2_usage_snapshot
 from trading_infra.strategy_builder import build_strategy
 from trading_infra.strategy_store import load_stored_strategy
 
@@ -169,6 +170,14 @@ def build_parser() -> argparse.ArgumentParser:
     r2_sync_check = subparsers.add_parser("r2-sync-check", help="Compare local partition manifest to R2 market data.")
     r2_sync_check.add_argument("--exchange", required=True)
     r2_sync_check.add_argument("--partition-manifest-path", default="data/import/manifests/partition_manifest.parquet")
+
+    r2_usage = subparsers.add_parser("r2-usage", help="Report R2 object inventory usage.")
+    r2_usage.add_argument("--prefix", default="")
+    r2_usage.add_argument("--snapshot-dir")
+
+    r2_budget = subparsers.add_parser("r2-budget-check", help="Check R2 usage against budget thresholds.")
+    r2_budget.add_argument("--prefix", default="")
+    r2_budget.add_argument("--snapshot-dir")
 
     format_inspect = subparsers.add_parser("format-inspect", help="Inspect expected bhavcopy format for a date.")
     format_inspect.add_argument("--exchange", required=True)
@@ -521,6 +530,10 @@ def history_doctor(args: argparse.Namespace) -> int:
 
 def history_upload(args: argparse.Namespace) -> int:
     client = R2Client.from_env()
+    budget = apply_r2_budget(collect_r2_usage(client))
+    if budget["status"] == "fail":
+        print(f"history-upload status=fail budget_status=fail reasons={budget['fail_reasons']}")
+        return 1
     results = upload_verified_history(
         client,
         path=args.path,
@@ -529,7 +542,10 @@ def history_upload(args: argparse.Namespace) -> int:
         raw_manifest_path=args.raw_manifest_path,
         partition_manifest_path=args.partition_manifest_path,
     )
-    print(f"history-upload path={args.path} audit_path={args.audit_path} partitions={len(results)}")
+    print(
+        f"history-upload path={args.path} audit_path={args.audit_path} "
+        f"budget_status={budget['status']} partitions={len(results)}"
+    )
     for result in results:
         print(
             f"{result.exchange} year={result.year} month={result.month:02d} rows={result.rows} "
@@ -553,6 +569,33 @@ def r2_sync_check(args: argparse.Namespace) -> int:
             f"local_size={row['local_file_size']} r2_size={row['r2_file_size']} key={row['r2_key']}"
         )
     return 0 if result.status == "ok" else 1
+
+
+def r2_usage(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    report = collect_r2_usage(client, prefix=args.prefix)
+    snapshot = write_r2_usage_snapshot(report, output_dir=args.snapshot_dir)
+    print(
+        f"r2-usage bucket={report['bucket']} storage_bytes={report['storage_bytes']} "
+        f"object_count={report['object_count']} snapshot={snapshot.as_posix()}"
+    )
+    return 0
+
+
+def r2_budget_check(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    report = apply_r2_budget(collect_r2_usage(client, prefix=args.prefix))
+    snapshot = write_r2_usage_snapshot(report, output_dir=args.snapshot_dir)
+    print(
+        f"r2-budget-check bucket={report['bucket']} storage_bytes={report['storage_bytes']} "
+        f"object_count={report['object_count']} "
+        f"class_a_operations_month_to_date={report['class_a_operations_month_to_date']} "
+        f"class_b_operations_month_to_date={report['class_b_operations_month_to_date']} "
+        f"estimated_free_tier_remaining={report['estimated_free_tier_remaining']} "
+        f"estimated_monthly_cost={report['estimated_monthly_cost']} status={report['status']} "
+        f"snapshot={snapshot.as_posix()}"
+    )
+    return 0 if report["status"] != "fail" else 1
 
 
 def format_inspect(args: argparse.Namespace) -> int:
@@ -604,6 +647,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_upload(args)
     if args.command == "r2-sync-check":
         return r2_sync_check(args)
+    if args.command == "r2-usage":
+        return r2_usage(args)
+    if args.command == "r2-budget-check":
+        return r2_budget_check(args)
     if args.command == "format-inspect":
         return format_inspect(args)
     parser.error(f"Unsupported command: {args.command}")

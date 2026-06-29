@@ -57,11 +57,18 @@ class R2Client:
 
     def list_keys(self, prefix: str) -> list[str]:
         """List object keys under a prefix."""
+        return [item["key"] for item in self.list_objects(prefix)]
+
+    def list_objects(self, prefix: str) -> list[dict]:
+        """List object keys and sizes under a prefix."""
         paginator = self._client.get_paginator("list_objects_v2")
-        keys: list[str] = []
+        objects: list[dict] = []
         for page in paginator.paginate(Bucket=self.config.bucket, Prefix=prefix):
-            keys.extend(item["Key"] for item in page.get("Contents", []))
-        return keys
+            objects.extend(
+                {"key": item["Key"], "size": int(item.get("Size", 0))}
+                for item in page.get("Contents", [])
+            )
+        return objects
 
     def exists(self, key: str) -> bool:
         """Return whether an object exists."""

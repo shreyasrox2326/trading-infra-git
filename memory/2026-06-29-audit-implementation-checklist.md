@@ -165,16 +165,16 @@ Target files:
 
 ### Phase 7: R2 Usage And Budget Guardrails
 
-- `TODO` Add object inventory usage summary from S3-compatible listing: bucket, storage bytes, and object count.
-- `TODO` Add optional Cloudflare analytics API support for Class A/Class B operation counts.
-- `TODO` Add `r2-usage`.
-- `TODO` Add `r2-budget-check`.
-- `TODO` Implement warn/fail thresholds from the audit, with config overrides if needed.
-- `TODO` Check budget before bulk historical upload.
+- `DONE` Add object inventory usage summary from S3-compatible listing: bucket, storage bytes, and object count.
+- `PARTIAL` Add optional Cloudflare analytics API support for Class A/Class B operation counts; usage schema supports nullable operation counts, analytics API integration remains optional future work.
+- `DONE` Add `r2-usage`.
+- `DONE` Add `r2-budget-check`.
+- `DONE` Implement warn/fail thresholds from the audit, with config overrides if needed.
+- `DONE` Check budget before bulk historical upload.
 - `TODO` Optionally add GitHub Actions budget check.
-- `TODO` Add monthly R2 usage snapshots.
-- `TODO` Report required usage fields: bucket, storage bytes, object count, Class A operations month-to-date, Class B operations month-to-date, estimated free-tier remaining, estimated monthly cost, and status.
-- `TODO` Add tests with fake R2 inventory and fake analytics responses.
+- `DONE` Add monthly R2 usage snapshots.
+- `DONE` Report required usage fields: bucket, storage bytes, object count, Class A operations month-to-date, Class B operations month-to-date, estimated free-tier remaining, estimated monthly cost, and status.
+- `DONE` Add tests with fake R2 inventory and fake analytics responses.
 
 Target files:
 

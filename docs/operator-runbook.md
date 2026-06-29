@@ -24,6 +24,15 @@ data/daily_stock_data/exchange=BSE/year=YYYY/month=MM/part.parquet
 
 Do not upload raw bhavcopy files as canonical R2 market data.
 
+Check object inventory usage and budget thresholds:
+
+```bash
+python -m trading_infra r2-usage
+python -m trading_infra r2-budget-check
+```
+
+Both commands write timestamped snapshots under `data/import/audit/r2_usage/`. `r2-budget-check` reports `status=ok|warn|fail` using the project warning/failure thresholds for storage and operation counts. Current operation counts are nullable unless Cloudflare analytics integration is configured later.
+
 ## 2. Local Full-History Bootstrap
 
 Fetch raw bhavcopy files into ignored local operator state. Run long downloads inside `tmux` and keep the per-date status log under `data/import/` or `data/raw/`.
