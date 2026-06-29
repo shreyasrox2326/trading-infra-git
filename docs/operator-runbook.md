@@ -90,6 +90,22 @@ python -m trading_infra history-fetch \
 
 `--fail-fast-rate-limit-ratio` aborts once observed `rate_limited` rows exceed the configured ratio and still writes the partial manifest rows collected before aborting.
 
+For a single-command local bootstrap, keep upload disabled until the local reports pass:
+
+```bash
+python -m trading_infra history-bootstrap \
+  --exchange NSE \
+  --start-date 1994-01-01 \
+  --end-date YYYY-MM-DD \
+  --raw-output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
+  --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
+  --audit-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
+  --resume \
+  --upload false
+```
+
+Use `--upload true` only after the local audit and doctor reports are acceptable.
+
 For NSE, `rate_limited` means the official archive returned HTTP 403. Stop the run, wait before retrying, and resume with low concurrency; do not continue a full-range run that is logging only `rate_limited` rows. NSE-facing bulk fetches should stay conservative: one worker plus roughly one second between requests.
 
 Build one canonical parquet locally:

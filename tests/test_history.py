@@ -10,11 +10,13 @@ from trading_infra.data.fetch_manifest import write_raw_fetch_manifest
 from trading_infra.data.history import (
     build_history_parquet,
     build_history_partitions,
+    HistoryBuildResult,
     verify_history_frame,
     verify_history_partitions,
     write_history_audit,
 )
 from trading_infra.data.history_doctor import run_history_doctor
+from trading_infra.bootstrap import run_history_bootstrap
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
 
 
@@ -575,6 +577,79 @@ def test_history_doctor_cli_writes_reports(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert "history-doctor exchange=NSE status=ok" in captured
     assert (tmp_path / "audit" / "history_doctor_NSE.json").exists()
+
+
+def test_history_bootstrap_orchestrates_without_upload(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    monkeypatch.setattr(
+        "trading_infra.bootstrap.fetch_bhavcopy_archives",
+        lambda **_kwargs: [BhavcopyFetchResult(date(2026, 1, 2), "downloaded", tmp_path / "raw.zip")],
+    )
+    monkeypatch.setattr("trading_infra.bootstrap.write_raw_fetch_manifest", lambda *_args, **_kwargs: calls.append("manifest"))
+    monkeypatch.setattr(
+        "trading_infra.bootstrap.build_history_partitions",
+        lambda **_kwargs: HistoryBuildResult(
+            output_path=tmp_path / "history",
+            log_path=tmp_path / "build.log",
+            rows=1,
+            partitions=1,
+            skipped_non_bhavcopy=0,
+            exchanges=["NSE"],
+            manifest_path=tmp_path / "partition_manifest.parquet",
+        ),
+    )
+    monkeypatch.setattr(
+        "trading_infra.bootstrap.write_history_audit",
+        lambda **_kwargs: {"passed": True, "rows": 1},
+    )
+
+    class _Doctor:
+        json_path = tmp_path / "doctor.json"
+        report = {"status": "ok"}
+
+    monkeypatch.setattr("trading_infra.bootstrap.run_history_doctor", lambda **_kwargs: _Doctor())
+    monkeypatch.setattr("trading_infra.bootstrap.upload_verified_history", lambda *_args, **_kwargs: calls.append("upload"))
+
+    result = run_history_bootstrap(
+        exchange="NSE",
+        start_date=date(2026, 1, 2),
+        end_date=date(2026, 1, 2),
+        raw_output_path=tmp_path / "raw",
+        history_path=tmp_path / "history",
+        audit_path=tmp_path / "audit.json",
+        upload=False,
+    )
+
+    assert result.status == "ok"
+    assert result.uploaded_partitions == 0
+    assert calls == ["manifest"]
+    assert [step["step"] for step in result.steps] == ["fetch", "build", "verify", "doctor"]
+
+
+def test_history_bootstrap_stops_before_build_on_rate_limit(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "trading_infra.bootstrap.fetch_bhavcopy_archives",
+        lambda **_kwargs: [BhavcopyFetchResult(date(2026, 1, 2), "rate_limited", None)],
+    )
+    monkeypatch.setattr("trading_infra.bootstrap.write_raw_fetch_manifest", lambda *_args, **_kwargs: None)
+
+    def fail_build(**_kwargs):
+        raise AssertionError("build should not run")
+
+    monkeypatch.setattr("trading_infra.bootstrap.build_history_partitions", fail_build)
+
+    result = run_history_bootstrap(
+        exchange="NSE",
+        start_date=date(2026, 1, 2),
+        end_date=date(2026, 1, 2),
+        raw_output_path=tmp_path / "raw",
+        history_path=tmp_path / "history",
+        audit_path=tmp_path / "audit.json",
+    )
+
+    assert result.status == "fail"
+    assert [step["step"] for step in result.steps] == ["fetch"]
 
 
 def test_history_fetch_cli_only_repairs_selected_manifest_statuses(monkeypatch, tmp_path, capsys) -> None:

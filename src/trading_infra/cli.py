@@ -14,6 +14,7 @@ from trading_infra.data.bhavcopy import (
     fetch_bhavcopy_archives,
     write_canonical_bhavcopy_parquet,
 )
+from trading_infra.bootstrap import run_history_bootstrap
 from trading_infra.data.fetch_manifest import (
     default_raw_fetch_manifest_path,
     select_manifest_dates,
@@ -159,6 +160,23 @@ def build_parser() -> argparse.ArgumentParser:
     history_doctor.add_argument("--start-date")
     history_doctor.add_argument("--end-date")
     history_doctor.add_argument("--compare-r2", action="store_true")
+
+    history_bootstrap = subparsers.add_parser("history-bootstrap", help="Run fetch/build/verify/doctor/upload bootstrap.")
+    history_bootstrap.add_argument("--exchange", required=True)
+    history_bootstrap.add_argument("--start-date", required=True)
+    history_bootstrap.add_argument("--end-date", required=True)
+    history_bootstrap.add_argument("--raw-output-path", required=True)
+    history_bootstrap.add_argument("--history-path", required=True)
+    history_bootstrap.add_argument("--audit-path", required=True)
+    history_bootstrap.add_argument("--raw-manifest-path")
+    history_bootstrap.add_argument("--partition-manifest-path")
+    history_bootstrap.add_argument("--resume", action="store_true")
+    history_bootstrap.add_argument("--upload", choices=["true", "false"], default="false")
+    history_bootstrap.add_argument("--workers", type=int, default=1)
+    history_bootstrap.add_argument("--retries", type=int, default=3)
+    history_bootstrap.add_argument("--request-sleep-seconds", type=float, default=0.0)
+    history_bootstrap.add_argument("--retry-sleep-seconds", type=float, default=1.0)
+    history_bootstrap.add_argument("--max-memory-gb", type=float)
 
     history_upload = subparsers.add_parser("history-upload", help="Upload verified full-history market data to R2.")
     history_upload.add_argument("--path", required=True)
@@ -528,6 +546,33 @@ def history_doctor(args: argparse.Namespace) -> int:
     return 1 if report["status"] == "fail" else 0
 
 
+def history_bootstrap(args: argparse.Namespace) -> int:
+    result = run_history_bootstrap(
+        exchange=args.exchange,
+        start_date=_parse_date(args.start_date),
+        end_date=_parse_date(args.end_date),
+        raw_output_path=args.raw_output_path,
+        history_path=args.history_path,
+        audit_path=args.audit_path,
+        raw_manifest_path=args.raw_manifest_path,
+        partition_manifest_path=args.partition_manifest_path,
+        resume=args.resume,
+        upload=args.upload == "true",
+        workers=args.workers,
+        retries=args.retries,
+        request_sleep_seconds=args.request_sleep_seconds,
+        retry_sleep_seconds=args.retry_sleep_seconds,
+        max_memory_gb=args.max_memory_gb,
+    )
+    print(
+        f"history-bootstrap exchange={result.exchange} status={result.status} "
+        f"raw_manifest={result.raw_manifest_path.as_posix()} history_path={result.history_path.as_posix()} "
+        f"audit={result.audit_path.as_posix()} partition_manifest={result.partition_manifest_path.as_posix()} "
+        f"uploaded_partitions={result.uploaded_partitions}"
+    )
+    return 0 if result.status == "ok" else 1
+
+
 def history_upload(args: argparse.Namespace) -> int:
     client = R2Client.from_env()
     budget = apply_r2_budget(collect_r2_usage(client))
@@ -643,6 +688,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_verify(args)
     if args.command == "history-doctor":
         return history_doctor(args)
+    if args.command == "history-bootstrap":
+        return history_bootstrap(args)
     if args.command == "history-upload":
         return history_upload(args)
     if args.command == "r2-sync-check":

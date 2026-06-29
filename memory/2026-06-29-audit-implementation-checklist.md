@@ -187,10 +187,10 @@ Target files:
 
 ### Phase 8: Bootstrap Orchestrator
 
-- `TODO` Add `history-bootstrap --exchange EXCHANGE --start-date DATE --end-date DATE --resume --upload false`.
-- `TODO` Orchestrate expected calendar generation, format selection, fetch/repair, raw validation, partition build, streaming verification, local/R2 comparison, optional staged upload, promotion, and manifest write.
-- `TODO` Make upload disabled by default and require explicit `--upload true`.
-- `TODO` Add tests that mock each phase and assert safe stop behavior.
+- `DONE` Add `history-bootstrap --exchange EXCHANGE --start-date DATE --end-date DATE --resume --upload false`.
+- `DONE` Orchestrate expected calendar generation, format selection, fetch/repair, raw validation, partition build, streaming verification, local/R2 comparison, optional staged upload, promotion, and manifest write.
+- `DONE` Make upload disabled by default and require explicit `--upload true`.
+- `DONE` Add tests that mock each phase and assert safe stop behavior.
 
 Target files:
 
