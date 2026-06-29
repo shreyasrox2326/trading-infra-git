@@ -14,6 +14,7 @@ from trading_infra.data.history import (
     verify_history_partitions,
     write_history_audit,
 )
+from trading_infra.data.history_doctor import run_history_doctor
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
 
 
@@ -277,6 +278,54 @@ def test_history_build_from_manifest_uses_listed_raw_files(tmp_path) -> None:
     assert "cm02JAN2026bhav" in manifest.get_column("source_raw_files").item()
 
 
+def test_history_doctor_reports_local_health(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    raw_file = raw / "cm02JAN2026bhav.csv.zip"
+    _write_zip(raw_file, [_nse_row()])
+    raw_manifest = tmp_path / "raw_fetch_NSE.parquet"
+    write_raw_fetch_manifest(
+        [BhavcopyFetchResult(date(2026, 1, 2), "downloaded", raw_file)],
+        exchange="NSE",
+        path=raw_manifest,
+    )
+    output = tmp_path / "daily_stock_data_full"
+    build_history_partitions(input_path=raw, output_path=output, exchanges=["NSE"])
+
+    result = run_history_doctor(
+        exchange="NSE",
+        raw_manifest_path=raw_manifest,
+        history_path=output,
+        output_dir=tmp_path / "audit",
+    )
+
+    assert result.report["status"] == "ok"
+    assert result.report["raw_downloaded"] == 1
+    assert result.report["parquet_partitions_present"] == 1
+    assert result.json_path.exists()
+    assert result.markdown_path.exists()
+
+
+def test_history_doctor_reports_failed_manifest_rows(tmp_path) -> None:
+    raw_manifest = tmp_path / "raw_fetch_NSE.parquet"
+    write_raw_fetch_manifest(
+        [BhavcopyFetchResult(date(2026, 1, 2), "rate_limited", None, "HTTP Error 403")],
+        exchange="NSE",
+        path=raw_manifest,
+    )
+
+    result = run_history_doctor(
+        exchange="NSE",
+        raw_manifest_path=raw_manifest,
+        history_path=tmp_path / "missing_history",
+        output_dir=tmp_path / "audit",
+    )
+
+    assert result.report["status"] == "fail"
+    assert result.report["raw_rate_limited"] == 1
+    assert "failed or rate_limited" in result.report["fail_reasons"][0]
+
+
 def test_verify_history_frame_rejects_invalid_ohlc() -> None:
     frame = pl.DataFrame(
         [
@@ -492,6 +541,40 @@ def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, ca
     ]
     assert manifest.get_column("bytes").to_list() == [7, 7]
     assert manifest.get_column("sha256").null_count() == 0
+
+
+def test_history_doctor_cli_writes_reports(tmp_path, capsys) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    raw_file = raw / "cm02JAN2026bhav.csv.zip"
+    _write_zip(raw_file, [_nse_row()])
+    raw_manifest = tmp_path / "raw_fetch_NSE.parquet"
+    write_raw_fetch_manifest(
+        [BhavcopyFetchResult(date(2026, 1, 2), "downloaded", raw_file)],
+        exchange="NSE",
+        path=raw_manifest,
+    )
+    output = tmp_path / "daily_stock_data_full"
+    build_history_partitions(input_path=raw, output_path=output, exchanges=["NSE"])
+
+    exit_code = main(
+        [
+            "history-doctor",
+            "--exchange",
+            "NSE",
+            "--raw-manifest-path",
+            str(raw_manifest),
+            "--history-path",
+            str(output),
+            "--output-dir",
+            str(tmp_path / "audit"),
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "history-doctor exchange=NSE status=ok" in captured
+    assert (tmp_path / "audit" / "history_doctor_NSE.json").exists()
 
 
 def test_history_fetch_cli_only_repairs_selected_manifest_statuses(monkeypatch, tmp_path, capsys) -> None:

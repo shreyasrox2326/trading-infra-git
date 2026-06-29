@@ -125,13 +125,13 @@ Target files:
 
 ### Phase 5: History Doctor
 
-- `TODO` Add `history-doctor --exchange EXCHANGE`.
-- `TODO` Add `history-doctor --compare-r2`.
-- `TODO` Report expected weekdays, raw downloaded/missing/rate-limited/unparseable counts, local parquet partitions, R2 partitions, mismatches, suspicious row counts, and status.
-- `TODO` Report corrupt HTML, parse failures, missing months, partition size/memory warnings, and local/R2 sync status.
-- `TODO` Write `data/import/audit/history_doctor_<EXCHANGE>.json`.
-- `TODO` Write `data/import/audit/history_doctor_<EXCHANGE>.md`.
-- `TODO` Add unit tests with fake local/R2 state.
+- `DONE` Add `history-doctor --exchange EXCHANGE`.
+- `DONE` Add `history-doctor --compare-r2`.
+- `DONE` Report expected weekdays, raw downloaded/missing/rate-limited/unparseable counts, local parquet partitions, R2 partitions, mismatches, suspicious row counts, and status.
+- `DONE` Report corrupt HTML, parse failures, missing months, partition size/memory warnings, and local/R2 sync status.
+- `DONE` Write `data/import/audit/history_doctor_<EXCHANGE>.json`.
+- `DONE` Write `data/import/audit/history_doctor_<EXCHANGE>.md`.
+- `DONE` Add unit tests with fake local/R2 state.
 
 Target files:
 

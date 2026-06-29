@@ -20,6 +20,7 @@ from trading_infra.data.fetch_manifest import (
     write_raw_fetch_manifest,
 )
 from trading_infra.data.formats import inspect_bhavcopy_format
+from trading_infra.data.history_doctor import run_history_doctor
 from trading_infra.data.history import build_history_parquet, build_history_partitions
 from trading_infra.data.history import write_history_audit
 from trading_infra.data.market_data import load_daily_stock_data
@@ -147,6 +148,15 @@ def build_parser() -> argparse.ArgumentParser:
     history_verify.add_argument("--partition-wise", action="store_true")
     history_verify.add_argument("--streaming", action="store_true")
     history_verify.add_argument("--max-memory-gb", type=float)
+
+    history_doctor = subparsers.add_parser("history-doctor", help="Audit local raw/parquet/R2 history health.")
+    history_doctor.add_argument("--exchange", required=True)
+    history_doctor.add_argument("--raw-manifest-path")
+    history_doctor.add_argument("--history-path", default="data/import/daily_stock_data_full")
+    history_doctor.add_argument("--output-dir")
+    history_doctor.add_argument("--start-date")
+    history_doctor.add_argument("--end-date")
+    history_doctor.add_argument("--compare-r2", action="store_true")
 
     history_upload = subparsers.add_parser("history-upload", help="Upload verified full-history market data to R2.")
     history_upload.add_argument("--path", required=True)
@@ -480,6 +490,28 @@ def history_verify(args: argparse.Namespace) -> int:
     return 0 if audit["passed"] else 1
 
 
+def history_doctor(args: argparse.Namespace) -> int:
+    result = run_history_doctor(
+        exchange=args.exchange,
+        raw_manifest_path=args.raw_manifest_path,
+        history_path=args.history_path,
+        output_dir=args.output_dir,
+        start_date=_parse_date(args.start_date) if args.start_date else None,
+        end_date=_parse_date(args.end_date) if args.end_date else None,
+        compare_r2=args.compare_r2,
+    )
+    report = result.report
+    print(
+        f"history-doctor exchange={report['exchange']} status={report['status']} "
+        f"raw_downloaded={report['raw_downloaded']} raw_missing={report['raw_missing']} "
+        f"raw_rate_limited={report['raw_rate_limited']} raw_unparseable={report['raw_unparseable']} "
+        f"parquet_partitions_present={report['parquet_partitions_present']} "
+        f"parquet_partitions_missing={len(report['parquet_partitions_missing'])} "
+        f"json={result.json_path.as_posix()} markdown={result.markdown_path.as_posix()}"
+    )
+    return 1 if report["status"] == "fail" else 0
+
+
 def history_upload(args: argparse.Namespace) -> int:
     client = R2Client.from_env()
     results = upload_verified_history(
@@ -540,6 +572,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_build(args)
     if args.command == "history-verify":
         return history_verify(args)
+    if args.command == "history-doctor":
+        return history_doctor(args)
     if args.command == "history-upload":
         return history_upload(args)
     if args.command == "format-inspect":

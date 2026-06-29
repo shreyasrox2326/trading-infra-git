@@ -136,6 +136,17 @@ The format registry lives in `src/trading_infra/data/formats.yaml`. It documents
 
 ## 3. Local Verification Before Upload
 
+Run a local health check when you need one command to summarize raw, parquet, and optional R2 state:
+
+```bash
+python -m trading_infra history-doctor \
+  --exchange NSE \
+  --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full
+```
+
+Add `--compare-r2` when R2 credentials are available. Reports are written to `data/import/audit/history_doctor_<EXCHANGE>.json` and `.md`.
+
 Verify before any R2 historical replacement:
 
 ```bash
