@@ -66,6 +66,21 @@ data/import/manifests/raw_fetch_<EXCHANGE>.parquet
 
 Override it with `--manifest-path`. The manifest records one row per expected weekday with the expected format id, expected filename, primary URL, local path, status, bytes, SHA256, last error, and parser hint.
 
+Repair only selected manifest statuses with `--only`:
+
+```bash
+python -m trading_infra history-fetch \
+  --exchange NSE \
+  --start-date 1994-01-01 \
+  --end-date YYYY-MM-DD \
+  --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
+  --manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  --only missing,rate_limited,failed \
+  --fail-fast-rate-limit-ratio 0.2
+```
+
+`--fail-fast-rate-limit-ratio` aborts once observed `rate_limited` rows exceed the configured ratio and still writes the partial manifest rows collected before aborting.
+
 For NSE, `rate_limited` means the official archive returned HTTP 403. Stop the run, wait before retrying, and resume with low concurrency; do not continue a full-range run that is logging only `rate_limited` rows. NSE-facing bulk fetches should stay conservative: one worker plus roughly one second between requests.
 
 Build one canonical parquet locally:

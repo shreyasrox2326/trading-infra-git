@@ -9,8 +9,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Sequence
 
-from trading_infra.data.bhavcopy import fetch_bhavcopy_archives, write_canonical_bhavcopy_parquet
-from trading_infra.data.fetch_manifest import default_raw_fetch_manifest_path, write_raw_fetch_manifest
+from trading_infra.data.bhavcopy import (
+    BhavcopyRateLimitError,
+    fetch_bhavcopy_archives,
+    write_canonical_bhavcopy_parquet,
+)
+from trading_infra.data.fetch_manifest import (
+    default_raw_fetch_manifest_path,
+    select_manifest_dates,
+    write_raw_fetch_manifest,
+)
 from trading_infra.data.formats import inspect_bhavcopy_format
 from trading_infra.data.history import build_history_parquet, build_history_partitions
 from trading_infra.data.history import write_history_audit
@@ -114,6 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
     history_fetch.add_argument("--request-sleep-seconds", type=float, default=0.0)
     history_fetch.add_argument("--log-path")
     history_fetch.add_argument("--manifest-path")
+    history_fetch.add_argument("--only")
+    history_fetch.add_argument("--fail-fast-rate-limit-ratio", type=float)
     history_fetch.add_argument("--progress", action="store_true", default=True)
     history_fetch.add_argument("--no-progress", dest="progress", action="store_false")
 
@@ -362,6 +372,17 @@ def bhavcopy_ingest(args: argparse.Namespace) -> int:
 
 def history_fetch(args: argparse.Namespace) -> int:
     log_path = Path(args.log_path) if args.log_path else Path(args.output_path) / "history-fetch.log"
+    manifest_path = Path(args.manifest_path) if args.manifest_path else default_raw_fetch_manifest_path(args.exchange)
+    only_statuses = (
+        {status.strip() for status in args.only.split(",") if status.strip()}
+        if args.only
+        else None
+    )
+    requested_dates = (
+        select_manifest_dates(manifest_path, statuses=only_statuses)
+        if only_statuses is not None
+        else None
+    )
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text("", encoding="utf-8")
 
@@ -373,32 +394,40 @@ def history_fetch(args: argparse.Namespace) -> int:
             )
             handle.flush()
 
-    results = fetch_bhavcopy_archives(
-        exchange=args.exchange,
-        start_date=_parse_date(args.start_date),
-        end_date=_parse_date(args.end_date),
-        output_path=args.output_path,
-        overwrite=args.overwrite,
-        workers=args.workers,
-        retries=args.retries,
-        retry_sleep_seconds=args.retry_sleep_seconds,
-        request_sleep_seconds=args.request_sleep_seconds,
-        show_progress=args.progress,
-        on_result=log_result,
-    )
+    aborted_message = ""
+    try:
+        results = fetch_bhavcopy_archives(
+            exchange=args.exchange,
+            start_date=_parse_date(args.start_date),
+            end_date=_parse_date(args.end_date),
+            output_path=args.output_path,
+            overwrite=args.overwrite,
+            workers=args.workers,
+            retries=args.retries,
+            retry_sleep_seconds=args.retry_sleep_seconds,
+            request_sleep_seconds=args.request_sleep_seconds,
+            show_progress=args.progress,
+            on_result=log_result,
+            requested_dates=requested_dates,
+            fail_fast_rate_limit_ratio=args.fail_fast_rate_limit_ratio,
+        )
+    except BhavcopyRateLimitError as exc:
+        results = exc.results
+        aborted_message = str(exc)
     counts: dict[str, int] = {}
     for result in results:
         counts[result.status] = counts.get(result.status, 0) + 1
-    manifest_path = Path(args.manifest_path) if args.manifest_path else default_raw_fetch_manifest_path(args.exchange)
     write_raw_fetch_manifest(results, exchange=args.exchange, path=manifest_path)
     print(
         f"history-fetch exchange={args.exchange.upper()} start_date={args.start_date} "
         f"end_date={args.end_date} output_path={args.output_path} workers={args.workers} "
         f"retries={args.retries} retry_sleep_seconds={args.retry_sleep_seconds} "
         f"request_sleep_seconds={args.request_sleep_seconds} counts={counts} "
-        f"log={log_path.as_posix()} manifest={manifest_path.as_posix()}"
+        f"only={args.only} log={log_path.as_posix()} manifest={manifest_path.as_posix()}"
     )
-    return 1 if counts.get("failed", 0) or counts.get("rate_limited", 0) else 0
+    if aborted_message:
+        print(f"history-fetch status=fail message={aborted_message}")
+    return 1 if aborted_message or counts.get("failed", 0) or counts.get("rate_limited", 0) else 0
 
 
 def history_build(args: argparse.Namespace) -> int:

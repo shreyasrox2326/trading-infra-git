@@ -28,6 +28,19 @@ FETCH_MANIFEST_COLUMNS: tuple[str, ...] = (
     "last_error",
     "parser_hint",
 )
+FETCH_STATUS_VALUES: tuple[str, ...] = (
+    "expected",
+    "downloaded",
+    "skipped_existing",
+    "not_available",
+    "holiday_or_no_session",
+    "rate_limited",
+    "failed",
+    "corrupt_html",
+    "parse_failed",
+    "validated",
+    "missing",
+)
 
 
 def default_raw_fetch_manifest_path(exchange: str) -> Path:
@@ -73,6 +86,51 @@ def build_raw_fetch_manifest(results: list[BhavcopyFetchResult], *, exchange: st
     return pl.DataFrame(rows).select(FETCH_MANIFEST_COLUMNS)
 
 
+def read_raw_fetch_manifest(path: str | Path) -> pl.DataFrame:
+    """Read a raw fetch manifest parquet."""
+    source = Path(path)
+    if not source.exists():
+        raise FileNotFoundError(f"Raw fetch manifest not found: {source}")
+    manifest = pl.read_parquet(source)
+    missing = [column for column in FETCH_MANIFEST_COLUMNS if column not in manifest.columns]
+    if missing:
+        raise ValueError(f"Raw fetch manifest is missing columns: {missing}")
+    return manifest.select(FETCH_MANIFEST_COLUMNS)
+
+
+def select_manifest_dates(path: str | Path, *, statuses: set[str]) -> list:
+    """Return dates whose manifest status is selected for repair."""
+    statuses = {"expected" if status == "missing" else status for status in statuses}
+    unsupported = sorted(statuses - set(FETCH_STATUS_VALUES))
+    if unsupported:
+        raise ValueError(f"Unsupported fetch manifest status filters: {unsupported}")
+    manifest = read_raw_fetch_manifest(path)
+    return (
+        manifest.filter(pl.col("status").is_in(sorted(statuses)))
+        .select("date")
+        .unique()
+        .sort("date")
+        .get_column("date")
+        .to_list()
+    )
+
+
+def merge_raw_fetch_manifest(
+    *,
+    existing_path: str | Path | None,
+    results: list[BhavcopyFetchResult],
+    exchange: str,
+) -> pl.DataFrame:
+    """Merge new result rows into an existing raw fetch manifest."""
+    new_rows = build_raw_fetch_manifest(results, exchange=exchange)
+    if existing_path is None or not Path(existing_path).exists():
+        return new_rows
+    existing = read_raw_fetch_manifest(existing_path)
+    replacement_dates = new_rows.select("date").unique().get_column("date").to_list()
+    retained = existing.filter(~pl.col("date").is_in(replacement_dates))
+    return pl.concat([retained, new_rows], how="vertical_relaxed").sort("date").select(FETCH_MANIFEST_COLUMNS)
+
+
 def write_raw_fetch_manifest(
     results: list[BhavcopyFetchResult],
     *,
@@ -82,5 +140,5 @@ def write_raw_fetch_manifest(
     """Write a raw fetch manifest parquet and return its path."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    build_raw_fetch_manifest(results, exchange=exchange).write_parquet(target)
+    merge_raw_fetch_manifest(existing_path=target, results=results, exchange=exchange).write_parquet(target)
     return target

@@ -66,6 +66,14 @@ class NonBhavcopyFileError(ValueError):
     """Raised when a fetched file is an HTML/error page instead of bhavcopy data."""
 
 
+class BhavcopyRateLimitError(RuntimeError):
+    """Raised when rate-limited fetch results exceed the configured guardrail."""
+
+    def __init__(self, message: str, results: list[BhavcopyFetchResult]) -> None:
+        super().__init__(message)
+        self.results = results
+
+
 def _normalize_exchange(exchange: str) -> str:
     normalized = exchange.upper()
     if normalized not in {"NSE", "BSE"}:
@@ -184,9 +192,24 @@ def fetch_bhavcopy_archives(
     timeout_seconds: int = 30,
     show_progress: bool = False,
     on_result: Callable[[BhavcopyFetchResult], None] | None = None,
+    requested_dates: list[date] | None = None,
+    fail_fast_rate_limit_ratio: float | None = None,
 ) -> list[BhavcopyFetchResult]:
     """Fetch exchange equity bhavcopy archives for all weekdays in a date range."""
-    days = trading_weekdays(start_date, end_date)
+    days = requested_dates if requested_dates is not None else trading_weekdays(start_date, end_date)
+    if fail_fast_rate_limit_ratio is not None and not 0 <= fail_fast_rate_limit_ratio <= 1:
+        raise ValueError("fail_fast_rate_limit_ratio must be between 0 and 1.")
+
+    def maybe_abort_for_rate_limits(results: list[BhavcopyFetchResult]) -> None:
+        if fail_fast_rate_limit_ratio is None or not results:
+            return
+        rate_limited = sum(1 for result in results if result.status == "rate_limited")
+        ratio = rate_limited / len(results)
+        if ratio > fail_fast_rate_limit_ratio:
+            raise BhavcopyRateLimitError(
+                f"rate_limited ratio {ratio:.3f} exceeded threshold {fail_fast_rate_limit_ratio:.3f}",
+                results,
+            )
 
     def fetch_one(trade_date: date) -> BhavcopyFetchResult:
         return fetch_bhavcopy_archive(
@@ -207,6 +230,7 @@ def fetch_bhavcopy_archives(
             if on_result is not None:
                 on_result(result)
             results.append(result)
+            maybe_abort_for_rate_limits(results)
             if request_sleep_seconds > 0 and result.network_requested:
                 sleep(request_sleep_seconds)
         return results
@@ -223,6 +247,7 @@ def fetch_bhavcopy_archives(
             if on_result is not None:
                 on_result(result)
             results_by_date[trade_date] = result
+            maybe_abort_for_rate_limits(list(results_by_date.values()))
             if request_sleep_seconds > 0 and result.network_requested:
                 sleep(request_sleep_seconds)
 

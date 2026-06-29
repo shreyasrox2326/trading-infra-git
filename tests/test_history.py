@@ -5,6 +5,8 @@ from zipfile import ZipFile
 import polars as pl
 
 from trading_infra.cli import main
+from trading_infra.data.bhavcopy import BhavcopyFetchResult
+from trading_infra.data.fetch_manifest import write_raw_fetch_manifest
 from trading_infra.data.history import (
     build_history_parquet,
     verify_history_frame,
@@ -353,3 +355,103 @@ def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, ca
     ]
     assert manifest.get_column("bytes").to_list() == [7, 7]
     assert manifest.get_column("sha256").null_count() == 0
+
+
+def test_history_fetch_cli_only_repairs_selected_manifest_statuses(monkeypatch, tmp_path, capsys) -> None:
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"payload"
+
+    manifest_path = tmp_path / "raw_fetch_NSE.parquet"
+    skipped_path = tmp_path / "raw" / "BhavCopy_NSE_CM_0_0_0_20260101_F_0000.csv.zip"
+    skipped_path.parent.mkdir()
+    skipped_path.write_bytes(b"old")
+    write_raw_fetch_manifest(
+        [
+            BhavcopyFetchResult(date(2026, 1, 1), "downloaded", skipped_path),
+            BhavcopyFetchResult(date(2026, 1, 2), "rate_limited", None, "HTTP Error 403"),
+        ],
+        exchange="NSE",
+        path=manifest_path,
+    )
+    requested_urls = []
+
+    def fake_urlopen(request, **_kwargs):
+        requested_urls.append(request.full_url)
+        return _Response()
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", fake_urlopen)
+
+    exit_code = main(
+        [
+            "history-fetch",
+            "--exchange",
+            "NSE",
+            "--start-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-01-02",
+            "--output-path",
+            str(tmp_path / "raw"),
+            "--manifest-path",
+            str(manifest_path),
+            "--only",
+            "rate_limited,failed",
+            "--retries",
+            "0",
+            "--no-progress",
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    manifest = pl.read_parquet(manifest_path).sort("date")
+    assert exit_code == 0
+    assert "only=rate_limited,failed" in captured
+    assert len(requested_urls) == 1
+    assert manifest.get_column("status").to_list() == ["downloaded", "downloaded"]
+    assert manifest.get_column("bytes").to_list() == [3, 7]
+
+
+def test_history_fetch_cli_fails_fast_on_rate_limit_ratio(monkeypatch, tmp_path, capsys) -> None:
+    from urllib.error import HTTPError
+
+    def fake_urlopen(request, **_kwargs):
+        raise HTTPError(request.full_url, 403, "Forbidden", hdrs=None, fp=None)
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", fake_urlopen)
+    manifest_path = tmp_path / "raw_fetch_NSE.parquet"
+
+    exit_code = main(
+        [
+            "history-fetch",
+            "--exchange",
+            "NSE",
+            "--start-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-01-02",
+            "--output-path",
+            str(tmp_path / "raw"),
+            "--manifest-path",
+            str(manifest_path),
+            "--fail-fast-rate-limit-ratio",
+            "0.2",
+            "--retries",
+            "0",
+            "--no-progress",
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    manifest = pl.read_parquet(manifest_path)
+    assert exit_code == 1
+    assert "status=fail" in captured
+    assert "rate_limited ratio" in captured
+    assert manifest.height == 1
+    assert manifest.get_column("status").to_list() == ["rate_limited"]
