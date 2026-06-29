@@ -162,6 +162,8 @@ def build_parser() -> argparse.ArgumentParser:
     history_upload = subparsers.add_parser("history-upload", help="Upload verified full-history market data to R2.")
     history_upload.add_argument("--path", required=True)
     history_upload.add_argument("--audit-path", required=True)
+    history_upload.add_argument("--raw-manifest-path", required=True)
+    history_upload.add_argument("--partition-manifest-path", required=True)
     history_upload.add_argument("--exchange", action="append")
 
     r2_sync_check = subparsers.add_parser("r2-sync-check", help="Compare local partition manifest to R2 market data.")
@@ -524,6 +526,8 @@ def history_upload(args: argparse.Namespace) -> int:
         path=args.path,
         audit_path=args.audit_path,
         exchanges=args.exchange,
+        raw_manifest_path=args.raw_manifest_path,
+        partition_manifest_path=args.partition_manifest_path,
     )
     print(f"history-upload path={args.path} audit_path={args.audit_path} partitions={len(results)}")
     for result in results:

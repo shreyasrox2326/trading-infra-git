@@ -188,6 +188,8 @@ Upload only after local verification passes:
 python -m trading_infra history-upload \
   --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
   --audit-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
+  --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  --partition-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/partition_manifest.parquet \
   --exchange NSE \
   --exchange BSE
 ```

@@ -149,9 +149,9 @@ Target files:
 - `DONE` Compare local partition manifest to R2 object existence, size, row count, and hash/etag where available.
 - `DONE` Include sync report fields: local partition path, R2 key, local row count, R2 row count, local file size, R2 file size, local SHA256 or etag-equivalent metadata, manifest entry, and status.
 - `DONE` Emit sync statuses such as `OK`, `MISSING`, `STALE`, and `EXTRA`.
-- `TODO` Block historical upload if sync check cannot be produced.
-- `TODO` Block historical upload unless source fetch manifest and partition audit pass.
-- `PARTIAL` Expand R2 manifest at `data/daily_stock_data/_manifest.json` with run id, created timestamp, exchange coverage, partition list, row counts, file sizes, SHA256s if available, source local audit id, and upload status; current manifest includes run id, timestamp, exchange coverage, partition rows, source/audit path, and upload status, but not SHA256s yet.
+- `DONE` Block historical upload if sync check cannot be produced.
+- `DONE` Block historical upload unless source fetch manifest and partition audit pass.
+- `DONE` Expand R2 manifest at `data/daily_stock_data/_manifest.json` with run id, created timestamp, exchange coverage, partition list, row counts, file sizes, SHA256s if available, source local audit id, and upload status.
 - `DONE` Add tests for partition-directory upload without combined-frame loading and sync mismatch reporting.
 
 Target files:

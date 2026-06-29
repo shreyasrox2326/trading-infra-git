@@ -6,6 +6,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from trading_infra.data.bhavcopy import BhavcopyFetchResult
+from trading_infra.data.fetch_manifest import write_raw_fetch_manifest
 from trading_infra.storage.config import R2Config
 from trading_infra.storage.history import upload_verified_history
 from trading_infra.storage.r2 import R2Client
@@ -133,6 +135,14 @@ def _write_partition_manifest(path: Path, partition_path: Path) -> None:
     ).write_parquet(path)
 
 
+def _write_raw_manifest(path: Path, source_path: Path, status: str = "downloaded") -> None:
+    write_raw_fetch_manifest(
+        [BhavcopyFetchResult(date(2026, 1, 2), status, source_path if status != "rate_limited" else None)],
+        exchange="NSE",
+        path=path,
+    )
+
+
 def test_upload_verified_history_refuses_failed_audit(monkeypatch, tmp_path) -> None:
     client = _fake_client(monkeypatch)
     history_path = tmp_path / "history.parquet"
@@ -152,6 +162,10 @@ def test_upload_verified_history_stages_then_promotes(monkeypatch, tmp_path) -> 
     audit_path = tmp_path / "audit.json"
     _history_frame().write_parquet(history_path)
     audit_path.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    raw_manifest_path = tmp_path / "raw_fetch_NSE.parquet"
+    partition_manifest_path = tmp_path / "partition_manifest.parquet"
+    _write_raw_manifest(raw_manifest_path, history_path)
+    _write_partition_manifest(partition_manifest_path, history_path)
     client.upload_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=01/old.parquet", b"stale")
 
     results = upload_verified_history(
@@ -160,6 +174,8 @@ def test_upload_verified_history_stages_then_promotes(monkeypatch, tmp_path) -> 
         audit_path=audit_path,
         exchanges=["NSE"],
         run_id="test-run",
+        raw_manifest_path=raw_manifest_path,
+        partition_manifest_path=partition_manifest_path,
     )
 
     fake = client._client  # type: ignore[attr-defined]
@@ -170,6 +186,9 @@ def test_upload_verified_history_stages_then_promotes(monkeypatch, tmp_path) -> 
     assert "data/daily_stock_data/_manifest.json" in fake.objects
     manifest = json.loads(fake.objects["data/daily_stock_data/_manifest.json"].decode("utf-8"))
     assert manifest["run_id"] == "test-run"
+    assert manifest["raw_manifest_path"] == str(raw_manifest_path)
+    assert manifest["partition_manifest_path"] == str(partition_manifest_path)
+    assert manifest["source_local_audit_id"] == str(audit_path)
     assert manifest["exchange_coverage"] == ["NSE"]
     assert manifest["upload_status"] == "promoted"
     assert manifest["partitions"][0]["rows"] == 1
@@ -181,8 +200,13 @@ def test_upload_verified_history_accepts_partition_directory(monkeypatch, tmp_pa
     partition_dir = tmp_path / "history" / "exchange=NSE" / "year=2026" / "month=01"
     partition_dir.mkdir(parents=True)
     audit_path = tmp_path / "audit.json"
-    _history_frame().write_parquet(partition_dir / "part.parquet")
+    partition_path = partition_dir / "part.parquet"
+    _history_frame().write_parquet(partition_path)
     audit_path.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    raw_manifest_path = tmp_path / "raw_fetch_NSE.parquet"
+    partition_manifest_path = tmp_path / "partition_manifest.parquet"
+    _write_raw_manifest(raw_manifest_path, partition_path)
+    _write_partition_manifest(partition_manifest_path, partition_path)
 
     results = upload_verified_history(
         client,
@@ -190,6 +214,8 @@ def test_upload_verified_history_accepts_partition_directory(monkeypatch, tmp_pa
         audit_path=audit_path,
         exchanges=["NSE"],
         run_id="test-run",
+        raw_manifest_path=raw_manifest_path,
+        partition_manifest_path=partition_manifest_path,
     )
 
     assert len(results) == 1
@@ -202,6 +228,10 @@ def test_upload_verified_history_does_not_promote_on_staging_failure(monkeypatch
     audit_path = tmp_path / "audit.json"
     _history_frame().write_parquet(history_path)
     audit_path.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    raw_manifest_path = tmp_path / "raw_fetch_NSE.parquet"
+    partition_manifest_path = tmp_path / "partition_manifest.parquet"
+    _write_raw_manifest(raw_manifest_path, history_path)
+    _write_partition_manifest(partition_manifest_path, history_path)
     client.upload_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet", b"existing")
 
     def _fail_verify(*_args, **_kwargs):
@@ -216,9 +246,32 @@ def test_upload_verified_history_does_not_promote_on_staging_failure(monkeypatch
             audit_path=audit_path,
             exchanges=["NSE"],
             run_id="test-run",
+            raw_manifest_path=raw_manifest_path,
+            partition_manifest_path=partition_manifest_path,
         )
 
     assert client.download_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet") == b"existing"
+
+
+def test_upload_verified_history_refuses_unresolved_raw_manifest(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    history_path = tmp_path / "history.parquet"
+    audit_path = tmp_path / "audit.json"
+    raw_manifest_path = tmp_path / "raw_fetch_NSE.parquet"
+    partition_manifest_path = tmp_path / "partition_manifest.parquet"
+    _history_frame().write_parquet(history_path)
+    audit_path.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    _write_raw_manifest(raw_manifest_path, history_path, status="rate_limited")
+    _write_partition_manifest(partition_manifest_path, history_path)
+
+    with pytest.raises(ValueError, match="unresolved"):
+        upload_verified_history(
+            client,
+            path=history_path,
+            audit_path=audit_path,
+            raw_manifest_path=raw_manifest_path,
+            partition_manifest_path=partition_manifest_path,
+        )
 
 
 def test_r2_sync_check_reports_ok_and_mismatches(monkeypatch, tmp_path) -> None:
