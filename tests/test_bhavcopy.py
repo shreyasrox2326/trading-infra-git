@@ -236,6 +236,29 @@ def test_normalize_empty_zip_file_is_non_bhavcopy(tmp_path) -> None:
         normalize_bhavcopy_inputs(source, exchange="NSE")
 
 
+def test_normalize_bhavcopy_file_reports_format_id_for_missing_required_column(tmp_path) -> None:
+    source = tmp_path / "cm02JAN2026bhav.csv.zip"
+    bad_row = _row()
+    bad_row.pop("TOTTRDQTY")
+    _write_bhavcopy_zip(source, [bad_row])
+
+    with pytest.raises(ValueError, match="format_id=nse_legacy_cm_bhavcopy_v1"):
+        normalize_bhavcopy_inputs(source, exchange="NSE")
+
+    with pytest.raises(ValueError, match="missing required column"):
+        normalize_bhavcopy_inputs(source, exchange="NSE")
+
+
+def test_normalize_bhavcopy_file_reports_format_id_for_later_parse_error(tmp_path) -> None:
+    source = tmp_path / "EQ020126_CSV.ZIP"
+    bad_row = _bse_legacy_row()
+    bad_row.pop("PREVCLOSE")
+    _write_bhavcopy_zip(source, [bad_row])
+
+    with pytest.raises(ValueError, match="format_id=bse_legacy_equity_bhavcopy_v1"):
+        normalize_bhavcopy_inputs(source, exchange="BSE")
+
+
 def test_fetch_nse_legacy_bhavcopy_archive_tries_mirror_after_primary_error(monkeypatch, tmp_path) -> None:
     from urllib.error import HTTPError
 

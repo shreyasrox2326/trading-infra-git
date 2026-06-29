@@ -451,9 +451,11 @@ def test_bhavcopy_ingest_cli(capsys, tmp_path) -> None:
 
     source = tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
     csv = (
-        "SYMBOL,SERIES,OPEN,HIGH,LOW,CLOSE,LAST,PREVCLOSE,TOTTRDQTY,TOTTRDVAL,"
-        "TIMESTAMP,TOTALTRADES,ISIN\n"
-        "ABC,EQ,100,101,99,100.5,100.5,98,1000,100500,02-JAN-2026,100,INE000000001\n"
+        "TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,FinInstrmNm,"
+        "OpnPric,HghPric,LwPric,ClsPric,LastPric,PrvsClsgPric,SttlmPric,TtlTradgVol,TtlTrfVal,"
+        "TtlNbOfTxsExctd,SsnId,NewBrdLotQty\n"
+        "2026-01-02,2026-01-02,CM,NSE,STK,1,INE000000001,ABC,EQ,ABC LIMITED,"
+        "100,101,99,100.5,100.5,98,100.5,1000,100500,100,F1,1\n"
     )
     with ZipFile(source, "w") as archive:
         archive.writestr("cm02JAN2026bhav.csv", csv)

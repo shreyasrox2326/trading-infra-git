@@ -18,7 +18,7 @@ from zipfile import ZipFile
 import polars as pl
 from tqdm import tqdm
 
-from trading_infra.data.formats import get_bhavcopy_format
+from trading_infra.data.formats import BhavcopyFormat, get_bhavcopy_format, load_bhavcopy_formats
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, DAILY_STOCK_DATA_SCHEMA
 
 NSE_MONTHS = {
@@ -321,12 +321,7 @@ def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
     else:
         frame = _read_csv_payload(path)
 
-    normalized = frame.rename(
-        {
-            column: column.strip().upper().replace(" ", "").replace("_", "")
-            for column in frame.columns
-        }
-    )
+    normalized = frame.rename({column: _normalize_column_name(column) for column in frame.columns})
     if normalized.columns:
         normalized = normalized.filter(
             pl.any_horizontal([pl.col(column).is_not_null() for column in normalized.columns])
@@ -340,11 +335,63 @@ def _read_bhavcopy_file(path: Path) -> pl.DataFrame:
 
 
 def _infer_bhavcopy_date_from_filename(path: Path) -> date | None:
-    match = re.search(r"EQ(\d{2})(\d{2})(\d{2})", path.name.upper())
-    if not match:
+    name = path.name.upper()
+    bse_legacy = re.search(r"EQ(\d{2})(\d{2})(\d{2})", name)
+    if bse_legacy:
+        day, month, year = bse_legacy.groups()
+        return date(2000 + int(year), int(month), int(day))
+    nse_legacy = re.search(r"CM(\d{2})([A-Z]{3})(\d{4})BHAV", name)
+    if nse_legacy:
+        day, month, year = nse_legacy.groups()
+        return date(int(year), int(NSE_MONTH_NUMBERS[month]), int(day))
+    udiff = re.search(r"_(\d{8})_F_", name)
+    if udiff:
+        return date.fromisoformat(f"{udiff.group(1)[:4]}-{udiff.group(1)[4:6]}-{udiff.group(1)[6:]}")
+    return None
+
+
+def _normalize_column_name(column: str) -> str:
+    return column.strip().upper().replace(" ", "").replace("_", "")
+
+
+def _format_by_id(format_id: str) -> BhavcopyFormat:
+    for item in load_bhavcopy_formats():
+        if item.format_id == format_id:
+            return item
+    raise ValueError(f"No bhavcopy format registered with format_id={format_id}.")
+
+
+def _infer_bhavcopy_format_from_filename(path: Path, *, exchange: str) -> BhavcopyFormat | None:
+    name = path.name.upper()
+    if exchange == "NSE" and name.startswith("CM"):
+        return _format_by_id("nse_legacy_cm_bhavcopy_v1")
+    if exchange == "NSE" and name.startswith("BHAVCOPY_NSE_CM"):
+        return _format_by_id("nse_udiff_cm_bhavcopy_v1")
+    if exchange == "BSE" and name.startswith("EQ"):
+        return _format_by_id("bse_legacy_equity_bhavcopy_v1")
+    if exchange == "BSE" and name.startswith("BHAVCOPY_BSE_CM"):
+        return _format_by_id("bse_udiff_cm_bhavcopy_v1")
+    inferred_date = _infer_bhavcopy_date_from_filename(path)
+    if inferred_date is None:
         return None
-    day, month, year = match.groups()
-    return date(2000 + int(year), int(month), int(day))
+    return get_bhavcopy_format(exchange, inferred_date)
+
+
+def _validate_required_format_columns(frame: pl.DataFrame, *, exchange: str, path: Path) -> str | None:
+    expected_format = _infer_bhavcopy_format_from_filename(path, exchange=exchange)
+    if expected_format is None:
+        return None
+    available = {_normalize_column_name(column) for column in frame.columns}
+    missing = [
+        column
+        for column in expected_format.required_columns
+        if _normalize_column_name(column) not in available
+    ]
+    if missing:
+        raise ValueError(
+            f"format_id={expected_format.format_id} missing required column(s): {missing}"
+        )
+    return expected_format.format_id
 
 
 def _column_expr(frame: pl.DataFrame, *names: str, default: pl.Expr | None = None) -> pl.Expr:
@@ -476,10 +523,18 @@ def normalize_bhavcopy_file(path: str | Path, *, exchange: str) -> pl.DataFrame:
     """Normalize one raw exchange bhavcopy file into canonical daily stock data."""
     source = Path(path)
     try:
-        return normalize_bhavcopy_frame(_read_bhavcopy_file(source), exchange=exchange)
+        frame = _read_bhavcopy_file(source)
+        format_id = _validate_required_format_columns(frame, exchange=_normalize_exchange(exchange), path=source)
+        return normalize_bhavcopy_frame(frame, exchange=exchange)
     except NonBhavcopyFileError:
         raise
     except Exception as exc:
+        if "format_id=" in str(exc):
+            raise ValueError(f"Failed to normalize bhavcopy file {source}: {exc}") from exc
+        inferred_format = _infer_bhavcopy_format_from_filename(source, exchange=_normalize_exchange(exchange))
+        if inferred_format is not None:
+            format_id = inferred_format.format_id
+            raise ValueError(f"Failed to normalize bhavcopy file {source}: format_id={format_id} {exc}") from exc
         raise ValueError(f"Failed to normalize bhavcopy file {source}: {exc}") from exc
 
 

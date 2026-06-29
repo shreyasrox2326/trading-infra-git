@@ -72,9 +72,9 @@ Target files:
 - `DONE` Store the registry at `src/trading_infra/data/formats.yaml` or `src/trading_infra/data/formats/*.yaml`.
 - `DONE` Connect filename, URL, expected date range, required columns, optional columns, and parser id through the registry.
 - `DONE` Include registry fields for exchange, `format_id`, date range, filename pattern, URL patterns, required columns, optional columns, parser name, known quirks, and fixture references.
-- `TODO` Make parser errors include `format_id` and required-column failures.
+- `DONE` Make parser errors include `format_id` and required-column failures.
 - `DONE` Add `format-inspect --exchange EXCHANGE --date YYYY-MM-DD`.
-- `PARTIAL` Add fixtures/tests for each registered format; current tests cover registry boundaries and existing parser fixtures indirectly.
+- `DONE` Add fixtures/tests for each registered format.
 - `DONE` Document known quirks, including old NSE missing `ISIN` fallback to `SYMBOL`.
 
 Target files:
