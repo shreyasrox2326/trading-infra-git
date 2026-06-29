@@ -42,6 +42,7 @@ This file is the navigation map for repo memory.
 
 - [Historical NSE data plan checklist](2026-06-28-historical-nse-plan-checklist.md)
 - [Full README alignment checklist](2026-06-28-full-readme-alignment-checklist.md)
+- [Audit implementation checklist](2026-06-29-audit-implementation-checklist.md)
 
 ## Future Update Rules
 
