@@ -17,6 +17,7 @@ from trading_infra.data.bhavcopy import (
     trading_weekdays,
     write_canonical_bhavcopy_parquet,
 )
+from trading_infra.data.formats import get_bhavcopy_format, inspect_bhavcopy_format
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, load_daily_stock_data
 from trading_infra.storage.market_data import list_market_data_partitions
 
@@ -143,6 +144,23 @@ def test_bse_bhavcopy_archive_names_support_legacy_and_udiff() -> None:
     assert bhavcopy_archive_url(date(2024, 7, 30), exchange="BSE").endswith(
         "/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_20240730_F_0000.CSV"
     )
+
+
+def test_bhavcopy_format_registry_selects_expected_periods() -> None:
+    assert get_bhavcopy_format("NSE", date(2024, 7, 7)).format_id == "nse_legacy_cm_bhavcopy_v1"
+    assert get_bhavcopy_format("NSE", date(2024, 7, 8)).format_id == "nse_udiff_cm_bhavcopy_v1"
+    assert get_bhavcopy_format("BSE", date(2024, 7, 29)).format_id == "bse_legacy_equity_bhavcopy_v1"
+    assert get_bhavcopy_format("BSE", date(2024, 7, 30)).format_id == "bse_udiff_cm_bhavcopy_v1"
+
+
+def test_bhavcopy_format_inspection_includes_operator_contract() -> None:
+    inspected = inspect_bhavcopy_format("NSE", date(2015, 12, 31))
+
+    assert inspected["format_id"] == "nse_legacy_cm_bhavcopy_v1"
+    assert inspected["filename"] == "cm31DEC2015bhav.csv.zip"
+    assert inspected["urls"] == bhavcopy_archive_urls(date(2015, 12, 31), exchange="NSE")
+    assert "SYMBOL" in inspected["required_columns"]
+    assert inspected["parser"] == "nse_legacy_cm"
 
 
 def test_fetch_bhavcopy_archive_without_network(monkeypatch, tmp_path) -> None:

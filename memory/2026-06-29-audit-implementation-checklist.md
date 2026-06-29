@@ -68,14 +68,14 @@ Target files:
 
 ### Phase 2: Explicit Bhavcopy Format Registry
 
-- `TODO` Add an exchange format registry for NSE/BSE legacy and UDiFF/common periods.
-- `TODO` Store the registry at `src/trading_infra/data/formats.yaml` or `src/trading_infra/data/formats/*.yaml`.
-- `TODO` Connect filename, URL, expected date range, required columns, optional columns, and parser id through the registry.
-- `TODO` Include registry fields for exchange, `format_id`, date range, filename pattern, URL patterns, required columns, optional columns, parser name, known quirks, and fixture references.
+- `DONE` Add an exchange format registry for NSE/BSE legacy and UDiFF/common periods.
+- `DONE` Store the registry at `src/trading_infra/data/formats.yaml` or `src/trading_infra/data/formats/*.yaml`.
+- `DONE` Connect filename, URL, expected date range, required columns, optional columns, and parser id through the registry.
+- `DONE` Include registry fields for exchange, `format_id`, date range, filename pattern, URL patterns, required columns, optional columns, parser name, known quirks, and fixture references.
 - `TODO` Make parser errors include `format_id` and required-column failures.
-- `TODO` Add `format-inspect --exchange EXCHANGE --date YYYY-MM-DD`.
-- `TODO` Add fixtures/tests for each registered format.
-- `TODO` Document known quirks, including old NSE missing `ISIN` fallback to `SYMBOL`.
+- `DONE` Add `format-inspect --exchange EXCHANGE --date YYYY-MM-DD`.
+- `PARTIAL` Add fixtures/tests for each registered format; current tests cover registry boundaries and existing parser fixtures indirectly.
+- `DONE` Document known quirks, including old NSE missing `ISIN` fallback to `SYMBOL`.
 
 Target files:
 

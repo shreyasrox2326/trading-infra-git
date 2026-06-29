@@ -18,16 +18,9 @@ from zipfile import ZipFile
 import polars as pl
 from tqdm import tqdm
 
+from trading_infra.data.formats import get_bhavcopy_format
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS, DAILY_STOCK_DATA_SCHEMA
 
-NSE_ARCHIVE_BASE_URL = "https://archives.nseindia.com/content/historical/EQUITIES"
-NSE_ARCHIVE_FALLBACK_BASE_URLS = (
-    "https://nsearchives.nseindia.com/content/historical/EQUITIES",
-)
-NSE_UDIFF_BASE_URL = "https://archives.nseindia.com/content/cm"
-NSE_UDIFF_START_DATE = date(2024, 7, 8)
-BSE_ARCHIVE_BASE_URL = "https://www.bseindia.com/download/BhavCopy/Equity"
-BSE_UDIFF_START_DATE = date(2024, 7, 30)
 NSE_MONTHS = {
     1: "JAN",
     2: "FEB",
@@ -82,48 +75,18 @@ def _normalize_exchange(exchange: str) -> str:
 def bhavcopy_archive_name(trade_date: date, *, exchange: str = "NSE") -> str:
     """Return the canonical exchange equity bhavcopy filename."""
     exchange = _normalize_exchange(exchange)
-    if exchange == "NSE":
-        if trade_date >= NSE_UDIFF_START_DATE:
-            return f"BhavCopy_NSE_CM_0_0_0_{trade_date:%Y%m%d}_F_0000.csv.zip"
-        month = NSE_MONTHS[trade_date.month]
-        return f"cm{trade_date:%d}{month}{trade_date:%Y}bhav.csv.zip"
-
-    if trade_date >= BSE_UDIFF_START_DATE:
-        return f"BhavCopy_BSE_CM_0_0_0_{trade_date:%Y%m%d}_F_0000.CSV"
-    return f"EQ{trade_date:%d%m%y}_CSV.ZIP"
+    return get_bhavcopy_format(exchange, trade_date).filename_for(trade_date)
 
 
 def bhavcopy_archive_url(trade_date: date, *, exchange: str = "NSE") -> str:
     """Return the canonical exchange historical bhavcopy URL."""
-    exchange = _normalize_exchange(exchange)
-    if exchange == "NSE" and trade_date >= NSE_UDIFF_START_DATE:
-        filename = bhavcopy_archive_name(trade_date)
-        return f"{NSE_UDIFF_BASE_URL}/{filename}"
-    if exchange == "NSE":
-        month = NSE_MONTHS[trade_date.month]
-        filename = bhavcopy_archive_name(trade_date)
-        return f"{NSE_ARCHIVE_BASE_URL}/{trade_date:%Y}/{month}/{filename}"
-
-    filename = bhavcopy_archive_name(trade_date, exchange=exchange)
-    return f"{BSE_ARCHIVE_BASE_URL}/{filename}"
+    return bhavcopy_archive_urls(trade_date, exchange=exchange)[0]
 
 
 def bhavcopy_archive_urls(trade_date: date, *, exchange: str = "NSE") -> list[str]:
     """Return official exchange bhavcopy URLs to try for one trade date."""
     exchange = _normalize_exchange(exchange)
-    primary = bhavcopy_archive_url(trade_date, exchange=exchange)
-    if exchange != "NSE" or trade_date >= NSE_UDIFF_START_DATE:
-        return [primary]
-
-    month = NSE_MONTHS[trade_date.month]
-    filename = bhavcopy_archive_name(trade_date, exchange=exchange)
-    return [
-        primary,
-        *[
-            f"{base_url}/{trade_date:%Y}/{month}/{filename}"
-            for base_url in NSE_ARCHIVE_FALLBACK_BASE_URLS
-        ],
-    ]
+    return get_bhavcopy_format(exchange, trade_date).urls_for(trade_date)
 
 
 def trading_weekdays(start_date: date, end_date: date) -> list[date]:

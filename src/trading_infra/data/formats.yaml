@@ -1,0 +1,125 @@
+formats:
+  - exchange: NSE
+    format_id: nse_legacy_cm_bhavcopy_v1
+    from: "1994-01-01"
+    to: "2024-07-07"
+    filename_pattern: "cmDDMONYYYYbhav.csv.zip"
+    url_patterns:
+      - "https://archives.nseindia.com/content/historical/EQUITIES/YYYY/MON/cmDDMONYYYYbhav.csv.zip"
+      - "https://nsearchives.nseindia.com/content/historical/EQUITIES/YYYY/MON/cmDDMONYYYYbhav.csv.zip"
+    required_columns:
+      - SYMBOL
+      - SERIES
+      - OPEN
+      - HIGH
+      - LOW
+      - CLOSE
+      - TOTTRDQTY
+      - TOTTRDVAL
+      - TIMESTAMP
+    optional_columns:
+      - ISIN
+      - PREVCLOSE
+      - TOTALTRADES
+      - DELIV_QTY
+      - DELIV_PER
+    parser: nse_legacy_cm
+    known_quirks:
+      - Older legacy files may omit ISIN; canonical ingestion falls back to SYMBOL for NSE rows.
+      - Official archive mirror may be required for some historical dates.
+    fixture_refs:
+      - tests/test_bhavcopy.py
+
+  - exchange: NSE
+    format_id: nse_udiff_cm_bhavcopy_v1
+    from: "2024-07-08"
+    to: null
+    filename_pattern: "BhavCopy_NSE_CM_0_0_0_YYYYMMDD_F_0000.csv.zip"
+    url_patterns:
+      - "https://archives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_YYYYMMDD_F_0000.csv.zip"
+    required_columns:
+      - TradDt
+      - BizDt
+      - Sgmt
+      - Src
+      - FinInstrmTp
+      - ISIN
+      - TckrSymb
+      - SctySrs
+      - OpnPric
+      - HghPric
+      - LwPric
+      - ClsPric
+      - PrvsClsgPric
+      - TtlTradgVol
+      - TtlTrfVal
+    optional_columns:
+      - TtlNbOfTxsExctd
+      - FinInstrmNm
+    parser: nse_udiff_cm
+    known_quirks:
+      - UDiFF/common files use mixed-case column names before ingestion normalizes them.
+    fixture_refs:
+      - tests/test_bhavcopy.py
+
+  - exchange: BSE
+    format_id: bse_legacy_equity_bhavcopy_v1
+    from: "2007-01-01"
+    to: "2024-07-29"
+    filename_pattern: "EQDDMMYY_CSV.ZIP"
+    url_patterns:
+      - "https://www.bseindia.com/download/BhavCopy/Equity/EQDDMMYY_CSV.ZIP"
+    required_columns:
+      - SC_CODE
+      - SC_NAME
+      - SC_GROUP
+      - OPEN
+      - HIGH
+      - LOW
+      - CLOSE
+      - NO_OF_SHRS
+      - NET_TURNOV
+    optional_columns:
+      - DATE
+      - PREVCLOSE
+      - NO_TRADES
+      - SC_TYPE
+      - TDCLOINDI
+    parser: bse_legacy_equity
+    known_quirks:
+      - Date may be inferred from the legacy filename when no date column is present.
+      - Some files contain ragged rows; ingestion trims/pads to the header width.
+    fixture_refs:
+      - tests/test_bhavcopy.py
+
+  - exchange: BSE
+    format_id: bse_udiff_cm_bhavcopy_v1
+    from: "2024-07-30"
+    to: null
+    filename_pattern: "BhavCopy_BSE_CM_0_0_0_YYYYMMDD_F_0000.CSV"
+    url_patterns:
+      - "https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_YYYYMMDD_F_0000.CSV"
+    required_columns:
+      - TradDt
+      - BizDt
+      - Sgmt
+      - Src
+      - FinInstrmTp
+      - ISIN
+      - TckrSymb
+      - SctySrs
+      - OpnPric
+      - HghPric
+      - LwPric
+      - ClsPric
+      - PrvsClsgPric
+      - TtlTradgVol
+      - TtlTrfVal
+    optional_columns:
+      - TtlNbOfTxsExctd
+      - FinInstrmNm
+    parser: bse_udiff_cm
+    known_quirks:
+      - BSE may include duplicate # symbol variants; ingestion keeps the plain symbol row when present.
+    fixture_refs:
+      - tests/test_bhavcopy.py

@@ -209,6 +209,16 @@ def test_backtest_run_writes_output(capsys, tmp_path) -> None:
     assert "source=local market_data_path=" in captured
 
 
+def test_format_inspect_cli(capsys) -> None:
+    exit_code = main(["format-inspect", "--exchange", "NSE", "--date", "2024-07-08"])
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "format-inspect exchange=NSE date=2024-07-08" in captured
+    assert "format_id=nse_udiff_cm_bhavcopy_v1" in captured
+    assert "filename=BhavCopy_NSE_CM_0_0_0_20240708_F_0000.csv.zip" in captured
+
+
 def test_backtest_run_supports_r2(capsys, monkeypatch, tmp_path) -> None:
     fake_client = _patch_r2(monkeypatch)
     _upload_strategy_files(fake_client, tmp_path)

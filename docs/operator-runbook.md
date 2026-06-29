@@ -98,6 +98,16 @@ Delivery fields may be null when the source bhavcopy does not include them.
 
 Older NSE legacy bhavcopies do not include `ISIN`. For those rows, canonical `isin` is populated with the source `SYMBOL` so the full history keeps a non-null security identifier.
 
+Inspect the expected source format for a date before debugging fetch or parse failures:
+
+```bash
+python -m trading_infra format-inspect \
+  --exchange NSE \
+  --date 2024-07-08
+```
+
+The format registry lives in `src/trading_infra/data/formats.yaml`. It documents the expected filename, primary/fallback URLs, required columns, optional columns, parser name, and known quirks for NSE/BSE legacy and UDiFF/common bhavcopy periods.
+
 ## 3. Local Verification Before Upload
 
 Verify before any R2 historical replacement:

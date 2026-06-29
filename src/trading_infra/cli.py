@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Sequence
 
 from trading_infra.data.bhavcopy import fetch_bhavcopy_archives, write_canonical_bhavcopy_parquet
+from trading_infra.data.formats import inspect_bhavcopy_format
 from trading_infra.data.history import build_history_parquet, build_history_partitions
 from trading_infra.data.history import write_history_audit
 from trading_infra.data.market_data import load_daily_stock_data
@@ -130,6 +132,11 @@ def build_parser() -> argparse.ArgumentParser:
     history_upload.add_argument("--path", required=True)
     history_upload.add_argument("--audit-path", required=True)
     history_upload.add_argument("--exchange", action="append")
+
+    format_inspect = subparsers.add_parser("format-inspect", help="Inspect expected bhavcopy format for a date.")
+    format_inspect.add_argument("--exchange", required=True)
+    format_inspect.add_argument("--date", required=True)
+    format_inspect.add_argument("--json", action="store_true")
 
     return parser
 
@@ -431,6 +438,21 @@ def history_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def format_inspect(args: argparse.Namespace) -> int:
+    inspected = inspect_bhavcopy_format(args.exchange, _parse_date(args.date))
+    if args.json:
+        print(json.dumps(inspected, indent=2))
+        return 0
+    print(
+        f"format-inspect exchange={inspected['exchange']} date={inspected['date']} "
+        f"format_id={inspected['format_id']} parser={inspected['parser']} "
+        f"filename={inspected['filename']} primary_url={inspected['urls'][0]}"
+    )
+    print(f"required_columns={inspected['required_columns']}")
+    print(f"optional_columns={inspected['optional_columns']}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -461,5 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_verify(args)
     if args.command == "history-upload":
         return history_upload(args)
+    if args.command == "format-inspect":
+        return format_inspect(args)
     parser.error(f"Unsupported command: {args.command}")
     return 2
