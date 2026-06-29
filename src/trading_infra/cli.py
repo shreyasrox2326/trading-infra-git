@@ -452,6 +452,7 @@ def history_build(args: argparse.Namespace) -> int:
         incremental=args.incremental,
         only_missing=args.only_missing,
         repair_partition=repair_partition,
+        source_manifest_path=args.from_manifest,
     )
     print(
         f"history-build input_path={args.input_path} output_path={result.output_path.as_posix()} "

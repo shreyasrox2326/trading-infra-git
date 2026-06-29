@@ -17,6 +17,8 @@ from tqdm import tqdm
 
 from trading_infra.data.bhavcopy import (
     NonBhavcopyFileError,
+    _infer_bhavcopy_format_from_filename,
+    _normalize_exchange,
     _resolve_bhavcopy_inputs,
     fetch_bhavcopy_archives,
     normalize_bhavcopy_file,
@@ -112,6 +114,9 @@ def _write_fragment_partitions(
     *,
     fragments_root: Path,
     counters: dict[tuple[str, int, int], int],
+    source_path: Path | None = None,
+    source_map: dict[tuple[str, int, int], list[dict[str, str]]] | None = None,
+    exchange: str | None = None,
 ) -> None:
     enriched = _partition_columns(frame)
     partitions = enriched.select(["exchange", "year", "month"]).unique().iter_rows(named=True)
@@ -129,6 +134,18 @@ def _write_fragment_partitions(
             .select(DAILY_STOCK_DATA_COLUMNS)
             .write_parquet(fragment_dir / f"fragment-{counters[key]:06d}.parquet")
         )
+        if source_path is not None and source_map is not None:
+            format_info = _infer_bhavcopy_format_from_filename(
+                source_path,
+                exchange=_normalize_exchange(exchange or key[0]),
+            )
+            source_map.setdefault(key, []).append(
+                {
+                    "path": source_path.as_posix(),
+                    "sha256": _file_sha256(source_path),
+                    "format_id": format_info.format_id if format_info is not None else "",
+                }
+            )
 
 
 def _normalize_exchange_files_to_fragments(
@@ -139,7 +156,7 @@ def _normalize_exchange_files_to_fragments(
     show_progress: bool,
     fragments_root: Path,
     logger: HistoryBuildLogger,
-) -> tuple[int, int]:
+) -> tuple[int, int, dict[tuple[str, int, int], list[dict[str, str]]]]:
     if not files:
         raise FileNotFoundError(f"No bhavcopy CSV or ZIP files found for exchange={exchange}.")
 
@@ -152,6 +169,7 @@ def _normalize_exchange_files_to_fragments(
     processed = 0
     skipped = 0
     counters: dict[tuple[str, int, int], int] = {}
+    source_map: dict[tuple[str, int, int], list[dict[str, str]]] = {}
     logger.write(f"exchange={exchange} phase=normalize_start files={len(files)} workers={workers}")
 
     if workers <= 1:
@@ -163,7 +181,14 @@ def _normalize_exchange_files_to_fragments(
                 skipped += 1
                 logger.write(f"exchange={exchange} status=skipped_non_bhavcopy file={path}")
                 continue
-            _write_fragment_partitions(frame, fragments_root=fragments_root, counters=counters)
+            _write_fragment_partitions(
+                frame,
+                fragments_root=fragments_root,
+                counters=counters,
+                source_path=path,
+                source_map=source_map,
+                exchange=exchange,
+            )
             if processed % 100 == 0:
                 logger.write(f"exchange={exchange} phase=normalize_progress processed={processed} skipped={skipped}")
     else:
@@ -180,7 +205,14 @@ def _normalize_exchange_files_to_fragments(
                     skipped += 1
                     logger.write(f"exchange={exchange} status=skipped_non_bhavcopy file={path}")
                     continue
-                _write_fragment_partitions(frame, fragments_root=fragments_root, counters=counters)
+                _write_fragment_partitions(
+                    frame,
+                    fragments_root=fragments_root,
+                    counters=counters,
+                    source_path=path,
+                    source_map=source_map,
+                    exchange=exchange,
+                )
                 if processed % 100 == 0:
                     logger.write(f"exchange={exchange} phase=normalize_progress processed={processed} skipped={skipped}")
 
@@ -191,7 +223,7 @@ def _normalize_exchange_files_to_fragments(
         f"exchange={exchange} phase=normalize_done processed={processed} skipped={skipped} "
         f"fragment_partitions={len(counters)}"
     )
-    return processed, skipped
+    return processed, skipped, source_map
 
 
 def _partition_manifest_path(output_root: Path) -> Path:
@@ -215,6 +247,7 @@ def _merge_fragment_partitions(
     fragments_root: Path,
     output_root: Path,
     logger: HistoryBuildLogger,
+    source_map: dict[tuple[str, int, int], list[dict[str, str]]],
 ) -> tuple[int, int, list[dict[str, Any]]]:
     partition_dirs = sorted(path for path in fragments_root.glob("exchange=*/year=*/month=*") if path.is_dir())
     rows = 0
@@ -245,6 +278,7 @@ def _merge_fragment_partitions(
         output_file = output_dir / "part.parquet"
         frame.write_parquet(output_file)
         rows += frame.height
+        source_entries = source_map.get((exchange, year, month), [])
         manifest_rows.append(
             {
                 "exchange": exchange,
@@ -257,7 +291,10 @@ def _merge_fragment_partitions(
                 "symbols": frame.get_column("symbol").n_unique(),
                 "file_size_bytes": output_file.stat().st_size,
                 "sha256": _file_sha256(output_file),
-                "source_raw_count": len(files),
+                "source_raw_count": len(source_entries) or len(files),
+                "source_raw_files": json.dumps([entry["path"] for entry in source_entries]),
+                "source_sha256s": json.dumps([entry["sha256"] for entry in source_entries]),
+                "format_ids": json.dumps(sorted({entry["format_id"] for entry in source_entries if entry["format_id"]})),
                 "parser_versions": "bhavcopy",
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "verified_at": None,
@@ -305,6 +342,7 @@ def build_history_partitions(
     incremental: bool = False,
     only_missing: bool = False,
     repair_partition: tuple[str, int, int] | None = None,
+    source_manifest_path: str | Path | None = None,
 ) -> HistoryBuildResult:
     """Build canonical monthly history parquet partitions from raw bhavcopy files."""
     input_root = Path(input_path)
@@ -337,6 +375,7 @@ def build_history_partitions(
             workers=workers,
             show_progress=show_progress,
             logger=logger,
+            source_manifest_path=source_manifest_path,
         )
         if update_mode:
             output_root.mkdir(parents=True, exist_ok=True)
@@ -377,6 +416,7 @@ def _build_history_partitions_into(
     workers: int,
     show_progress: bool,
     logger: HistoryBuildLogger,
+    source_manifest_path: str | Path | None,
 ) -> HistoryBuildResult:
     """Build canonical monthly history parquet partitions into output_root."""
     output_root.mkdir(parents=True, exist_ok=True)
@@ -385,13 +425,17 @@ def _build_history_partitions_into(
 
     skipped = 0
     built_exchanges: list[str] = []
+    merged_source_map: dict[tuple[str, int, int], list[dict[str, str]]] = {}
     for exchange in _normalize_exchanges(exchanges):
         source = _exchange_input_path(input_root, exchange)
-        if not source.exists():
+        if source_manifest_path is not None:
+            files = _resolve_manifest_source_files(source_manifest_path, exchange=exchange)
+        elif not source.exists():
             logger.write(f"exchange={exchange} status=missing_source path={source}")
             continue
-        files = _resolve_bhavcopy_inputs(source)
-        _processed, exchange_skipped = _normalize_exchange_files_to_fragments(
+        else:
+            files = _resolve_bhavcopy_inputs(source)
+        _processed, exchange_skipped, exchange_source_map = _normalize_exchange_files_to_fragments(
             files,
             exchange=exchange,
             workers=workers,
@@ -400,6 +444,8 @@ def _build_history_partitions_into(
             logger=logger,
         )
         skipped += exchange_skipped
+        for key, entries in exchange_source_map.items():
+            merged_source_map.setdefault(key, []).extend(entries)
         built_exchanges.append(exchange)
 
     if not built_exchanges:
@@ -409,6 +455,7 @@ def _build_history_partitions_into(
         fragments_root=fragments_root,
         output_root=output_root,
         logger=logger,
+        source_map=merged_source_map,
     )
     shutil.rmtree(fragments_root)
     manifest_path = _write_partition_manifest(manifest_rows, output_root)
@@ -421,6 +468,31 @@ def _build_history_partitions_into(
         exchanges=built_exchanges,
         manifest_path=manifest_path,
     )
+
+
+def _resolve_manifest_source_files(source_manifest_path: str | Path, *, exchange: str) -> list[Path]:
+    manifest = pl.read_parquet(source_manifest_path)
+    required = {"exchange", "local_path", "status"}
+    missing = required - set(manifest.columns)
+    if missing:
+        raise ValueError(f"Source manifest is missing columns: {sorted(missing)}")
+    local_paths = (
+        manifest.filter(
+            (pl.col("exchange") == exchange)
+            & pl.col("status").is_in(["downloaded", "skipped_existing", "validated"])
+            & pl.col("local_path").is_not_null()
+        )
+        .select("local_path")
+        .unique()
+        .sort("local_path")
+        .get_column("local_path")
+        .to_list()
+    )
+    files = [Path(path) for path in local_paths]
+    missing_files = [path for path in files if not path.exists()]
+    if missing_files:
+        raise FileNotFoundError(f"Source manifest references missing local files: {missing_files[:5]}")
+    return files
 
 
 def _copy_built_partitions(

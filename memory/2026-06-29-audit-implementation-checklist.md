@@ -110,10 +110,10 @@ Target files:
 - `DONE` Add `history-build --incremental`.
 - `DONE` Add `history-build --only-missing`.
 - `DONE` Add `history-build --repair-partition EXCHANGE YEAR MONTH`.
-- `TODO` Add `history-build --from-manifest`.
+- `DONE` Add `history-build --from-manifest`.
 - `DONE` Write `data/import/manifests/partition_manifest.parquet`.
 - `DONE` Include partition manifest columns: `exchange`, `year`, `month`, `partition_path`, `row_count`, `min_date`, `max_date`, `symbols`, `file_size_bytes`, `sha256`, `source_raw_count`, `parser_versions`, `created_at`, `verified_at`, and `status`.
-- `PARTIAL` Preserve source raw files, source hashes, parser version, format id, row count, min/max date, created timestamp, local file size, and SHA256 in build metadata; current manifest preserves source fragment count and parser label but not raw-file hashes yet.
+- `DONE` Preserve source raw files, source hashes, parser version, format id, row count, min/max date, created timestamp, local file size, and SHA256 in build metadata.
 - `DONE` Add targeted rebuild tests.
 
 Target files:

@@ -108,7 +108,7 @@ It shows progress by default and writes timestamped phase logs. Monitor a long r
 tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-build.log
 ```
 
-`history-build` writes `data/import/manifests/partition_manifest.parquet`. Use `--clean` for an explicit destructive rebuild. Use `--incremental`, `--only-missing`, or `--repair-partition EXCHANGE YEAR MONTH` to update existing output without deleting unrelated partitions.
+`history-build` writes `data/import/manifests/partition_manifest.parquet`. Use `--clean` for an explicit destructive rebuild. Use `--incremental`, `--only-missing`, or `--repair-partition EXCHANGE YEAR MONTH` to update existing output without deleting unrelated partitions. Use `--from-manifest data/import/manifests/raw_fetch_<EXCHANGE>.parquet` to build only from raw files whose fetch-manifest status is `downloaded`, `skipped_existing`, or `validated`.
 
 Current ingestion uses identity adjustment:
 

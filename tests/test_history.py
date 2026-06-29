@@ -83,6 +83,9 @@ def test_build_history_parquet_combines_exchange_subdirectories(tmp_path) -> Non
         "file_size_bytes",
         "sha256",
         "source_raw_count",
+        "source_raw_files",
+        "source_sha256s",
+        "format_ids",
         "parser_versions",
         "created_at",
         "verified_at",
@@ -90,6 +93,8 @@ def test_build_history_parquet_combines_exchange_subdirectories(tmp_path) -> Non
     }
     assert frame.columns == list(DAILY_STOCK_DATA_COLUMNS)
     assert frame.get_column("exchange").to_list() == ["BSE", "NSE"]
+    assert manifest.get_column("source_raw_files").str.contains("cm02JAN2026bhav").any()
+    assert manifest.get_column("source_sha256s").str.contains(r"[0-9a-f]{64}").any()
 
 
 def test_build_history_parquet_skips_html_non_bhavcopy_files(tmp_path) -> None:
@@ -236,6 +241,40 @@ def test_history_build_repair_partition_updates_only_selected_partition(tmp_path
     assert result.partitions == 1
     assert jan_part.read_bytes() == jan_before
     assert feb_frame.get_column("close").to_list() == [101.5]
+
+
+def test_history_build_from_manifest_uses_listed_raw_files(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    included = raw / "cm02JAN2026bhav.csv.zip"
+    excluded = raw / "cm02FEB2026bhav.csv.zip"
+    jan = _nse_row()
+    feb = _nse_row()
+    feb["TIMESTAMP"] = "02-FEB-2026"
+    _write_zip(included, [jan])
+    _write_zip(excluded, [feb])
+    raw_manifest = tmp_path / "raw_fetch_NSE.parquet"
+    write_raw_fetch_manifest(
+        [
+            BhavcopyFetchResult(date(2026, 1, 2), "downloaded", included),
+            BhavcopyFetchResult(date(2026, 2, 2), "failed", excluded),
+        ],
+        exchange="NSE",
+        path=raw_manifest,
+    )
+
+    result = build_history_partitions(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full",
+        exchanges=["NSE"],
+        source_manifest_path=raw_manifest,
+    )
+
+    manifest = pl.read_parquet(result.manifest_path)
+    assert result.partitions == 1
+    assert (result.output_path / "exchange=NSE" / "year=2026" / "month=01" / "part.parquet").exists()
+    assert not (result.output_path / "exchange=NSE" / "year=2026" / "month=02" / "part.parquet").exists()
+    assert "cm02JAN2026bhav" in manifest.get_column("source_raw_files").item()
 
 
 def test_verify_history_frame_rejects_invalid_ohlc() -> None:
