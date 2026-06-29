@@ -90,12 +90,12 @@ Target files:
 
 - `DONE` Refactor `write_history_audit` to verify monthly partitions independently.
 - `DONE` Keep only compact partition summaries in memory.
-- `PARTIAL` Include per-partition schema, dtypes, row count, min/max date, duplicate keys, nulls, invalid OHLC, negative values, symbol count, file size, and SHA256; first pass includes row count, file size, SHA256, duplicate keys, invalid OHLC, and negative value counts.
+- `DONE` Include per-partition schema, dtypes, row count, min/max date, duplicate keys, nulls, invalid OHLC, negative values, symbol count, file size, and SHA256.
 - `DONE` Add cross-partition summaries without loading full history.
 - `DONE` Add `history-verify --partition-wise`.
-- `TODO` Add `history-verify --streaming` and `--max-memory-gb`; make partition-wise/streaming the documented default.
-- `TODO` Hard fail if estimated verification memory exceeds the configured cap.
-- `TODO` Add tests proving partition-directory verification does not require a combined frame.
+- `DONE` Add `history-verify --streaming` and `--max-memory-gb`; make partition-wise/streaming the documented default.
+- `DONE` Hard fail if estimated verification memory exceeds the configured cap.
+- `DONE` Add tests proving partition-directory verification does not require a combined frame.
 
 Target files:
 

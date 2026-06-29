@@ -139,7 +139,8 @@ Verify before any R2 historical replacement:
 python -m trading_infra history-verify \
   --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
   --report-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
-  --partition-wise
+  --partition-wise \
+  --max-memory-gb 4
 ```
 
 `history-verify` verifies monthly parquet files partition by partition and writes compact aggregate metadata instead of loading the full history into one frame. Inspect `history_audit.json` and `history_audit.md`. Confirm:

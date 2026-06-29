@@ -449,7 +449,11 @@ def history_build(args: argparse.Namespace) -> int:
 
 
 def history_verify(args: argparse.Namespace) -> int:
-    audit = write_history_audit(path=args.path, report_path=args.report_path)
+    audit = write_history_audit(
+        path=args.path,
+        report_path=args.report_path,
+        max_memory_gb=args.max_memory_gb,
+    )
     print(
         f"history-verify path={args.path} report_path={args.report_path} "
         f"passed={str(audit['passed']).lower()} rows={audit['rows']} "

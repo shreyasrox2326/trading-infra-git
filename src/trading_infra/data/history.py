@@ -522,6 +522,9 @@ def verify_history_partitions(files: list[Path]) -> dict[str, Any]:
         by_month.extend(audit["by_month"])
 
         if not audit["missing_columns"] and frame.height:
+            date_min = frame.get_column("date").min()
+            date_max = frame.get_column("date").max()
+            symbol_count = frame.get_column("symbol").n_unique()
             for row in audit["by_exchange"]:
                 exchange = row["exchange"]
                 stats = exchange_stats.setdefault(
@@ -543,10 +546,17 @@ def verify_history_partitions(files: list[Path]) -> dict[str, Any]:
                 "path": file.as_posix(),
                 "passed": audit["passed"],
                 "rows": audit["rows"],
+                "schema_columns": frame.columns,
+                "dtypes": {column: str(dtype) for column, dtype in zip(frame.columns, frame.dtypes, strict=False)},
+                "date_min": date_min if not audit["missing_columns"] and frame.height else None,
+                "date_max": date_max if not audit["missing_columns"] and frame.height else None,
+                "symbols": symbol_count if not audit["missing_columns"] and frame.height else 0,
                 "file_size_bytes": file.stat().st_size,
                 "sha256": _file_sha256(file),
                 "missing_columns": audit["missing_columns"],
                 "unexpected_columns": audit["unexpected_columns"],
+                "required_null_columns": audit["required_null_columns"],
+                "null_counts": audit["null_counts"],
                 "duplicate_key_count": audit["duplicate_key_count"],
                 "invalid_ohlc_count": audit["invalid_ohlc_count"],
                 "negative_volume_count": audit["negative_volume_count"],
@@ -600,9 +610,30 @@ def verify_history_partitions(files: list[Path]) -> dict[str, Any]:
     }
 
 
-def write_history_audit(*, path: str | Path, report_path: str | Path) -> dict[str, Any]:
+def _enforce_history_verify_memory_cap(files: list[Path], max_memory_gb: float | None) -> None:
+    if max_memory_gb is None:
+        return
+    if max_memory_gb <= 0:
+        raise ValueError("--max-memory-gb must be positive.")
+    largest_file_size = max((file.stat().st_size for file in files), default=0)
+    estimated_peak_bytes = largest_file_size * 4
+    cap_bytes = max_memory_gb * 1024 * 1024 * 1024
+    if estimated_peak_bytes > cap_bytes:
+        raise MemoryError(
+            f"history-verify estimated peak memory {estimated_peak_bytes} bytes exceeds cap {int(cap_bytes)} bytes"
+        )
+
+
+def write_history_audit(
+    *,
+    path: str | Path,
+    report_path: str | Path,
+    max_memory_gb: float | None = None,
+) -> dict[str, Any]:
     """Verify a canonical history parquet and write JSON plus a short Markdown report."""
-    audit = verify_history_partitions(resolve_history_parquet_files(path))
+    files = resolve_history_parquet_files(path)
+    _enforce_history_verify_memory_cap(files, max_memory_gb)
+    audit = verify_history_partitions(files)
     report = Path(report_path)
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(audit, indent=2, default=_json_default) + "\n", encoding="utf-8")

@@ -228,6 +228,9 @@ def test_write_history_audit_writes_json_and_markdown(tmp_path) -> None:
     assert audit["verification_mode"] == "partition-wise"
     assert audit["partitions"] == 1
     assert audit["partition_summaries"][0]["sha256"]
+    assert audit["partition_summaries"][0]["schema_columns"] == list(DAILY_STOCK_DATA_COLUMNS)
+    assert audit["partition_summaries"][0]["date_min"] == date(2026, 1, 2)
+    assert audit["partition_summaries"][0]["symbols"] == 1
     assert report.exists()
     assert report.with_suffix(".md").exists()
 
@@ -254,6 +257,28 @@ def test_verify_history_partitions_aggregates_partition_summaries(tmp_path) -> N
     assert audit["partitions"] == 2
     assert [row["month"] for row in audit["by_month"]] == [1, 2]
     assert all(row["sha256"] for row in audit["partition_summaries"])
+
+
+def test_write_history_audit_enforces_memory_cap(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [_nse_row()])
+    output, _ = build_history_parquet(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full.parquet",
+        exchanges=["NSE"],
+    )
+
+    try:
+        write_history_audit(
+            path=output,
+            report_path=tmp_path / "history_audit.json",
+            max_memory_gb=0.000000001,
+        )
+    except MemoryError as exc:
+        assert "estimated peak memory" in str(exc)
+    else:
+        raise AssertionError("Expected memory cap failure.")
 
 
 def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
@@ -288,6 +313,8 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
             "--report-path",
             str(report),
             "--partition-wise",
+            "--max-memory-gb",
+            "4",
         ]
     )
 
