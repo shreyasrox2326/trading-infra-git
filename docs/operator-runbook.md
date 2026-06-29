@@ -147,6 +147,16 @@ python -m trading_infra history-doctor \
 
 Add `--compare-r2` when R2 credentials are available. Reports are written to `data/import/audit/history_doctor_<EXCHANGE>.json` and `.md`.
 
+Compare the local partition manifest against canonical R2 market-data objects before and after historical upload:
+
+```bash
+python -m trading_infra r2-sync-check \
+  --exchange NSE \
+  --partition-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/partition_manifest.parquet
+```
+
+The sync check reports `OK`, `MISSING`, `STALE`, and `EXTRA` rows using local/R2 row counts, file sizes, and SHA256 hashes where available.
+
 Verify before any R2 historical replacement:
 
 ```bash

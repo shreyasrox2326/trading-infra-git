@@ -40,6 +40,7 @@ from trading_infra.storage.remote import (
 from trading_infra.storage.refresh import refresh_market_data_for_date
 from trading_infra.storage.remote import load_daily_stock_data_history_from_r2
 from trading_infra.storage.r2 import R2Client
+from trading_infra.storage.sync import check_r2_sync
 from trading_infra.strategy_builder import build_strategy
 from trading_infra.strategy_store import load_stored_strategy
 
@@ -162,6 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
     history_upload.add_argument("--path", required=True)
     history_upload.add_argument("--audit-path", required=True)
     history_upload.add_argument("--exchange", action="append")
+
+    r2_sync_check = subparsers.add_parser("r2-sync-check", help="Compare local partition manifest to R2 market data.")
+    r2_sync_check.add_argument("--exchange", required=True)
+    r2_sync_check.add_argument("--partition-manifest-path", default="data/import/manifests/partition_manifest.parquet")
 
     format_inspect = subparsers.add_parser("format-inspect", help="Inspect expected bhavcopy format for a date.")
     format_inspect.add_argument("--exchange", required=True)
@@ -529,6 +534,23 @@ def history_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def r2_sync_check(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    result = check_r2_sync(
+        client,
+        exchange=args.exchange,
+        partition_manifest_path=args.partition_manifest_path,
+    )
+    print(f"r2-sync-check exchange={args.exchange.upper()} status={result.status} rows={len(result.rows)}")
+    for row in result.rows:
+        print(
+            f"{row['status']} {row['exchange']} year={row['year']} month={row['month']} "
+            f"local_rows={row['local_row_count']} r2_rows={row['r2_row_count']} "
+            f"local_size={row['local_file_size']} r2_size={row['r2_file_size']} key={row['r2_key']}"
+        )
+    return 0 if result.status == "ok" else 1
+
+
 def format_inspect(args: argparse.Namespace) -> int:
     inspected = inspect_bhavcopy_format(args.exchange, _parse_date(args.date))
     if args.json:
@@ -576,6 +598,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_doctor(args)
     if args.command == "history-upload":
         return history_upload(args)
+    if args.command == "r2-sync-check":
+        return r2_sync_check(args)
     if args.command == "format-inspect":
         return format_inspect(args)
     parser.error(f"Unsupported command: {args.command}")

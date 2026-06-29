@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from hashlib import sha256
 from pathlib import Path
 
 import polars as pl
@@ -8,6 +9,7 @@ import pytest
 from trading_infra.storage.config import R2Config
 from trading_infra.storage.history import upload_verified_history
 from trading_infra.storage.r2 import R2Client
+from trading_infra.storage.sync import check_r2_sync
 
 
 class _FakePaginator:
@@ -103,6 +105,34 @@ def _history_frame() -> pl.DataFrame:
     )
 
 
+def _file_sha256(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def _write_partition_manifest(path: Path, partition_path: Path) -> None:
+    pl.DataFrame(
+        [
+            {
+                "exchange": "NSE",
+                "year": 2026,
+                "month": 1,
+                "partition_path": partition_path.as_posix(),
+                "row_count": 1,
+                "min_date": date(2026, 1, 2),
+                "max_date": date(2026, 1, 2),
+                "symbols": 1,
+                "file_size_bytes": partition_path.stat().st_size,
+                "sha256": _file_sha256(partition_path),
+                "source_raw_count": 1,
+                "parser_versions": "bhavcopy",
+                "created_at": "2026-06-29T00:00:00",
+                "verified_at": None,
+                "status": "built",
+            }
+        ]
+    ).write_parquet(path)
+
+
 def test_upload_verified_history_refuses_failed_audit(monkeypatch, tmp_path) -> None:
     client = _fake_client(monkeypatch)
     history_path = tmp_path / "history.parquet"
@@ -189,3 +219,29 @@ def test_upload_verified_history_does_not_promote_on_staging_failure(monkeypatch
         )
 
     assert client.download_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet") == b"existing"
+
+
+def test_r2_sync_check_reports_ok_and_mismatches(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    partition_path = tmp_path / "part.parquet"
+    manifest_path = tmp_path / "partition_manifest.parquet"
+    _history_frame().write_parquet(partition_path)
+    _write_partition_manifest(manifest_path, partition_path)
+    client.upload_file(partition_path, "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet")
+
+    ok = check_r2_sync(client, exchange="NSE", partition_manifest_path=manifest_path)
+
+    assert ok.status == "ok"
+    assert ok.rows[0]["status"] == "OK"
+
+    client.upload_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=02/part.parquet", b"not parquet")
+    stale_path = tmp_path / "stale.parquet"
+    stale_frame = _history_frame().with_columns(pl.lit(101.5).alias("close"))
+    stale_frame.write_parquet(stale_path)
+    client.upload_file(stale_path, "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet")
+
+    mismatch = check_r2_sync(client, exchange="NSE", partition_manifest_path=manifest_path)
+
+    statuses = {row["status"] for row in mismatch.rows}
+    assert "STALE" in statuses
+    assert "EXTRA" in statuses
