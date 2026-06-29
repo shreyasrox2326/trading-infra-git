@@ -46,6 +46,7 @@ class BhavcopyFetchResult:
     status: str
     path: Path | None
     message: str = ""
+    network_requested: bool = False
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,7 @@ def fetch_bhavcopy_archive(
                     last_error = "HTML response instead of bhavcopy data."
                     continue
                 target.write_bytes(payload)
-                return BhavcopyFetchResult(trade_date, "downloaded", target, url)
+                return BhavcopyFetchResult(trade_date, "downloaded", target, url, network_requested=True)
             except HTTPError as exc:
                 if exc.code == 404:
                     last_error = str(exc)
@@ -163,10 +164,10 @@ def fetch_bhavcopy_archive(
             sleep(retry_sleep_seconds * attempt)
 
     if last_error.startswith("HTTP Error 404") or last_error == "HTML response instead of bhavcopy data.":
-        return BhavcopyFetchResult(trade_date, "not_available", None, last_error)
+        return BhavcopyFetchResult(trade_date, "not_available", None, last_error, network_requested=True)
     if saw_forbidden:
-        return BhavcopyFetchResult(trade_date, "rate_limited", None, last_error)
-    return BhavcopyFetchResult(trade_date, "failed", None, last_error)
+        return BhavcopyFetchResult(trade_date, "rate_limited", None, last_error, network_requested=True)
+    return BhavcopyFetchResult(trade_date, "failed", None, last_error, network_requested=True)
 
 
 def fetch_bhavcopy_archives(
@@ -206,7 +207,7 @@ def fetch_bhavcopy_archives(
             if on_result is not None:
                 on_result(result)
             results.append(result)
-            if request_sleep_seconds > 0:
+            if request_sleep_seconds > 0 and result.network_requested:
                 sleep(request_sleep_seconds)
         return results
 
@@ -222,7 +223,7 @@ def fetch_bhavcopy_archives(
             if on_result is not None:
                 on_result(result)
             results_by_date[trade_date] = result
-            if request_sleep_seconds > 0:
+            if request_sleep_seconds > 0 and result.network_requested:
                 sleep(request_sleep_seconds)
 
     return [results_by_date[trade_date] for trade_date in days]

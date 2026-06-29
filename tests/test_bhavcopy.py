@@ -179,6 +179,7 @@ def test_fetch_bhavcopy_archive_without_network(monkeypatch, tmp_path) -> None:
     result = fetch_bhavcopy_archive(date(2026, 1, 2), output_path=tmp_path)
 
     assert result.status == "downloaded"
+    assert result.network_requested is True
     assert result.path == tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
     assert result.path.read_bytes() == b"payload"
 
@@ -201,6 +202,7 @@ def test_fetch_bhavcopy_archive_refetches_empty_existing_file(monkeypatch, tmp_p
     result = fetch_bhavcopy_archive(date(2026, 1, 2), output_path=tmp_path)
 
     assert result.status == "downloaded"
+    assert result.network_requested is True
     assert result.path == target
     assert target.read_bytes() == b"payload"
 
@@ -221,6 +223,7 @@ def test_fetch_bhavcopy_archive_treats_html_response_as_not_available(monkeypatc
     result = fetch_bhavcopy_archive(date(2026, 1, 2), output_path=tmp_path)
 
     assert result.status == "not_available"
+    assert result.network_requested is True
     assert result.path is None
     assert not (tmp_path / bhavcopy_archive_name(date(2026, 1, 2))).exists()
 
@@ -259,6 +262,7 @@ def test_fetch_nse_legacy_bhavcopy_archive_tries_mirror_after_primary_error(monk
     result = fetch_bhavcopy_archive(date(2015, 12, 31), output_path=tmp_path, retries=0)
 
     assert result.status == "downloaded"
+    assert result.network_requested is True
     assert result.message == requested_urls[1]
     assert requested_urls == bhavcopy_archive_urls(date(2015, 12, 31), exchange="NSE")
     assert result.path == tmp_path / "cm31DEC2015bhav.csv.zip"
@@ -279,8 +283,48 @@ def test_fetch_nse_legacy_bhavcopy_archive_reports_rate_limit(monkeypatch, tmp_p
     result = fetch_bhavcopy_archive(date(2000, 1, 11), output_path=tmp_path, retries=0)
 
     assert result.status == "rate_limited"
+    assert result.network_requested is True
     assert result.path is None
     assert requested_urls == bhavcopy_archive_urls(date(2000, 1, 11), exchange="NSE")
+
+
+def test_fetch_bhavcopy_archive_marks_existing_file_as_non_network(tmp_path) -> None:
+    target = tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
+    target.write_bytes(b"payload")
+
+    result = fetch_bhavcopy_archive(date(2026, 1, 2), output_path=tmp_path)
+
+    assert result.status == "skipped_existing"
+    assert result.network_requested is False
+
+
+def test_fetch_bhavcopy_archives_sleeps_only_after_network_requests(monkeypatch, tmp_path) -> None:
+    existing = tmp_path / bhavcopy_archive_name(date(2026, 1, 2))
+    existing.write_bytes(b"payload")
+    slept = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"payload"
+
+    monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", lambda *_args, **_kwargs: _Response())
+    monkeypatch.setattr("trading_infra.data.bhavcopy.sleep", lambda seconds: slept.append(seconds))
+
+    results = fetch_bhavcopy_archives(
+        start_date=date(2026, 1, 2),
+        end_date=date(2026, 1, 5),
+        output_path=tmp_path,
+        request_sleep_seconds=1.5,
+    )
+
+    assert [result.status for result in results] == ["skipped_existing", "downloaded"]
+    assert slept == [1.5]
 
 
 def test_fetch_bhavcopy_archives_parallel_preserves_date_order(monkeypatch, tmp_path) -> None:

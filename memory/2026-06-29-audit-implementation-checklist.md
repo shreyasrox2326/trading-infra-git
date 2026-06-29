@@ -53,7 +53,7 @@ Status labels:
 - `TODO` Support fetch status values from the audit: `expected`, `downloaded`, `skipped_existing`, `not_available`, `holiday_or_no_session`, `rate_limited`, `failed`, `corrupt_html`, `parse_failed`, and `validated`.
 - `TODO` Add `history-fetch --only missing,rate_limited,failed` repair mode.
 - `TODO` Add `history-fetch --fail-fast-rate-limit-ratio <ratio>`.
-- `TODO` Ensure request sleep happens only after real network requests, not skipped existing files.
+- `DONE` Ensure request sleep happens only after real network requests, not skipped existing files.
 - `TODO` Require manifest completeness before build/upload flows that claim full history.
 - `TODO` Add tests for skipped-existing sleep behavior, repair filtering, and fail-fast rate-limit policy.
 
