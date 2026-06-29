@@ -48,6 +48,9 @@ jobs:
       - name: Install project
         run: python -m pip install -e .
 
+      - name: Check R2 budget
+        run: python -m trading_infra r2-budget-check
+
       - name: Resolve run date
         id: run-date
         shell: bash

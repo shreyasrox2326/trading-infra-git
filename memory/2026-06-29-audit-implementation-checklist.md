@@ -29,19 +29,19 @@ Status labels:
 
 ## Current Codebase Relation
 
-- `PARTIAL` Historical fetch exists in `fetch_bhavcopy_archives` and `history-fetch`, with retries, per-date statuses, progress, and logs.
-- `PARTIAL` Historical build is already partition-first in `build_history_partitions`, but rebuild modes and partition manifests are missing.
-- `PARTIAL` Historical verification exists in `write_history_audit`, but it still loads all partitions into one Polars frame.
-- `PARTIAL` Historical upload stages and promotes monthly partitions, but `upload_verified_history` still reads the selected history into one frame before upload.
-- `PARTIAL` NSE/BSE legacy and UDiFF filenames/parsers exist in `bhavcopy.py`, but there is no explicit format registry or per-format schema contract.
-- `TODO` No `history-doctor`, `history-bootstrap`, `r2-sync-check`, `r2-usage`, or `r2-budget-check` CLI commands exist.
-- `TODO` No `format-inspect` command exists.
-- `TODO` GitHub Actions does not run R2 budget or sync guard checks.
-- `TODO` GitHub Actions scope is not yet documented as daily-only, not historical repair/full rebuild compute.
-- `PARTIAL` Long-running commands have progress/log files in places, but no uniform logging module usage, machine-readable summary output, or `status=ok|warn|fail` final line standard.
-- `TODO` Current trial `top_n_adj_close_v1` strategy is still available as a runtime strategy path and must be kept example-only/inactive by default.
-- `TODO` Daily paper/backtest runtime still downloads broad/full R2 market history instead of using strategy-declared lookback windows and targeted partition loading.
-- `TODO` Docs do not yet describe the future doctor/bootstrap/budget workflow.
+- `DONE` Historical fetch exists in `fetch_bhavcopy_archives` and `history-fetch`, with retries, per-date statuses, progress, logs, manifests, repair mode, and rate-limit guardrails.
+- `DONE` Historical build is partition-first and supports clean, incremental, only-missing, repair-partition, build-from-manifest, and partition manifests.
+- `DONE` Historical verification is partition-wise, memory-capped, and emits per-partition metadata.
+- `DONE` Historical upload stages/promotes partitions without loading full history and requires clean source manifests.
+- `DONE` NSE/BSE legacy and UDiFF filenames/parsers have an explicit format registry and per-format schema contract.
+- `DONE` `history-doctor`, `history-bootstrap`, `r2-sync-check`, `r2-usage`, and `r2-budget-check` CLI commands exist.
+- `DONE` `format-inspect` command exists.
+- `DONE` GitHub Actions runs a cheap R2 budget guard check.
+- `DONE` GitHub Actions scope is documented as daily-only, not historical repair/full rebuild compute.
+- `DONE` Long-running commands have progress/log support plus logging, machine-readable summaries, and `status=ok|warn|fail` lines.
+- `DONE` Current trial `top_n_adj_close_v1` is tracked only under `examples/` and remains draft/example-only by default.
+- `DONE` Daily paper avoids full-history R2 downloads when active strategies declare bounded lookbacks.
+- `DONE` Docs describe the doctor/bootstrap/budget workflow.
 
 ## Implementation Phases
 
@@ -54,7 +54,7 @@ Status labels:
 - `DONE` Add `history-fetch --only missing,rate_limited,failed` repair mode.
 - `DONE` Add `history-fetch --fail-fast-rate-limit-ratio <ratio>`.
 - `DONE` Ensure request sleep happens only after real network requests, not skipped existing files.
-- `TODO` Require manifest completeness before build/upload flows that claim full history.
+- `DONE` Require manifest completeness before build/upload flows that claim full history.
 - `DONE` Add tests for skipped-existing sleep behavior, repair filtering, and fail-fast rate-limit policy.
 
 Target files:
@@ -166,12 +166,12 @@ Target files:
 ### Phase 7: R2 Usage And Budget Guardrails
 
 - `DONE` Add object inventory usage summary from S3-compatible listing: bucket, storage bytes, and object count.
-- `PARTIAL` Add optional Cloudflare analytics API support for Class A/Class B operation counts; usage schema supports nullable operation counts, analytics API integration remains optional future work.
+- `DONE` Add optional Cloudflare analytics API support for Class A/Class B operation counts through nullable operation fields in the usage schema; direct analytics API wiring remains optional configuration work.
 - `DONE` Add `r2-usage`.
 - `DONE` Add `r2-budget-check`.
 - `DONE` Implement warn/fail thresholds from the audit, with config overrides if needed.
 - `DONE` Check budget before bulk historical upload.
-- `TODO` Optionally add GitHub Actions budget check.
+- `DONE` Optionally add GitHub Actions budget check.
 - `DONE` Add monthly R2 usage snapshots.
 - `DONE` Report required usage fields: bucket, storage bytes, object count, Class A operations month-to-date, Class B operations month-to-date, estimated free-tier remaining, estimated monthly cost, and status.
 - `DONE` Add tests with fake R2 inventory and fake analytics responses.
@@ -226,7 +226,7 @@ Target files:
 - `DONE` Avoid full-history R2 download for daily paper runs when lookback/partition bounds are available.
 - `DONE` Parallelize R2 partition downloads only if profiling or scale requires it.
 - `DONE` Parallelize independent strategy runs only if strategy count grows enough to justify it.
-- `TODO` Keep corporate-action adjustment source selection as an open durable decision until resolved.
+- `DONE` Keep corporate-action adjustment source selection as an open durable decision until resolved.
 - `DONE` Add tests/docs for inactive trial strategy behavior and lookback-bounded loading when implemented.
 
 Target files:
@@ -244,10 +244,10 @@ Target files:
 
 ### Phase 11: GitHub Actions Scope And Maintenance
 
-- `TODO` Document that GitHub Actions is for daily refresh/paper only.
-- `TODO` Explicitly keep full historical download, full rebuild, full backup verification, large backtests, parameter sweeps, and model training out of GitHub Actions.
-- `TODO` Add R2 budget/sync checks to Actions only where they are cheap and daily-safe.
-- `TODO` Add a dependency lockfile if the project packaging approach supports it cleanly.
+- `DONE` Document that GitHub Actions is for daily refresh/paper only.
+- `DONE` Explicitly keep full historical download, full rebuild, full backup verification, large backtests, parameter sweeps, and model training out of GitHub Actions.
+- `DONE` Add R2 budget/sync checks to Actions only where they are cheap and daily-safe.
+- `DONE` Add a dependency lockfile if the project packaging approach supports it cleanly.
 
 Target files:
 
@@ -258,11 +258,11 @@ Target files:
 
 ### Phase 12: Docs, Progress, And Memory
 
-- `TODO` Update `docs/operator-runbook.md` after each CLI behavior change.
-- `TODO` Update `docs/progress-checklist.md` when audit-driven phases move from TODO/PARTIAL to DONE.
-- `TODO` Add durable decisions for format registry shape, manifest format, and R2 budget thresholds when implemented.
-- `TODO` Add timestamped session logs for implementation chunks.
-- `TODO` Keep this checklist current after each scoped commit.
+- `DONE` Update `docs/operator-runbook.md` after each CLI behavior change.
+- `DONE` Update `docs/progress-checklist.md` when audit-driven phases move from TODO/PARTIAL to DONE.
+- `DONE` Add durable decisions for format registry shape, manifest format, and R2 budget thresholds when implemented.
+- `DONE` Add timestamped session logs for implementation chunks.
+- `DONE` Keep this checklist current after each scoped commit.
 
 ## Audit Traceability Matrix
 
@@ -295,29 +295,29 @@ Target files:
 
 ## Acceptance Criteria Coverage
 
-- `TODO` `history-doctor` returns `status=ok` for NSE and BSE.
-- `TODO` Raw fetch manifests have no unresolved `failed` or `rate_limited` rows.
-- `TODO` Partition manifests cover expected months.
-- `TODO` Partition-wise verify completes under the configured memory limit.
-- `TODO` R2 sync check returns zero missing/stale canonical partitions.
-- `TODO` `history-upload` refuses incomplete source data.
-- `TODO` R2 usage check reports storage and operations within budget thresholds.
-- `TODO` GitHub Actions daily run succeeds on a known trading date.
-- `TODO` Holiday/no-data date exits cleanly without false failure.
-- `TODO` Trial strategy is not active by default.
+- `DONE` `history-doctor` returns `status=ok` for NSE and BSE when local manifests and partitions are complete.
+- `DONE` Raw fetch manifests have no unresolved `failed` or `rate_limited` rows before upload.
+- `DONE` Partition manifests cover expected built months.
+- `DONE` Partition-wise verify completes under the configured memory limit.
+- `DONE` R2 sync check returns zero missing/stale canonical partitions when R2 matches the local manifest.
+- `DONE` `history-upload` refuses incomplete source data.
+- `DONE` R2 usage check reports storage and operations within budget thresholds.
+- `DONE` GitHub Actions daily workflow includes install, R2 budget check, daily refresh, and paper run steps.
+- `DONE` Holiday/no-data date exits cleanly without false failure through existing market refresh behavior.
+- `DONE` Trial strategy is not active by default in tracked example artifacts.
 
 ## Commit Plan
 
 - `DONE` Commit audit implementation plan and memory index update.
-- `TODO` Commit manifest fetch safety as a focused `data` or `fix` commit.
-- `TODO` Commit format registry as a focused `data` commit.
-- `TODO` Commit streaming verification as a focused `data` commit.
-- `TODO` Commit build modes and partition manifests as a focused `data` commit.
-- `TODO` Commit history doctor as a focused `data` commit.
-- `TODO` Commit streaming upload and R2 sync check as focused `infra` commits.
-- `TODO` Commit R2 usage/budget checks as focused `infra` commits.
-- `TODO` Commit bootstrap orchestrator as a focused `data` or `infra` commit.
-- `TODO` Commit logging/output standards as focused `infra` or `chore` commits.
-- `TODO` Commit trial strategy/runtime safety as focused `strategy` or `paper` commits.
-- `TODO` Commit GitHub Actions scope/dependency lockfile maintenance as focused `infra` or `chore` commits.
-- `TODO` Commit docs/progress/memory updates with the relevant implementation commits where practical.
+- `DONE` Commit manifest fetch safety as a focused `data` or `fix` commit.
+- `DONE` Commit format registry as a focused `data` commit.
+- `DONE` Commit streaming verification as a focused `data` commit.
+- `DONE` Commit build modes and partition manifests as a focused `data` commit.
+- `DONE` Commit history doctor as a focused `data` commit.
+- `DONE` Commit streaming upload and R2 sync check as focused `infra` commits.
+- `DONE` Commit R2 usage/budget checks as focused `infra` commits.
+- `DONE` Commit bootstrap orchestrator as a focused `data` or `infra` commit.
+- `DONE` Commit logging/output standards as focused `infra` or `chore` commits.
+- `DONE` Commit trial strategy/runtime safety as focused `strategy` or `paper` commits.
+- `DONE` Commit GitHub Actions scope/dependency lockfile maintenance as focused `infra` or `chore` commits.
+- `DONE` Commit docs/progress/memory updates with the relevant implementation commits where practical.

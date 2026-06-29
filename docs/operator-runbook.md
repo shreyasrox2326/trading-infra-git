@@ -330,6 +330,8 @@ Recommended first run inputs:
 
 The scheduled workflow refreshes market data before paper evaluation. If refresh returns `no_data` for an exchange/date, paper evaluation is skipped for that exchange/date.
 
+GitHub Actions is intentionally scoped to daily refresh, cheap R2 budget checks, paper evaluation, and paper-decision upload. Do not use this workflow for full historical download, full historical rebuild, full backup verification, large backtests, parameter sweeps, or model training; keep those local or move them to dedicated compute later.
+
 ## 10. Validation Checklist
 
 Run a local R2-backed paper dry-run:

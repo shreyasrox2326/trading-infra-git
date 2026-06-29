@@ -45,6 +45,7 @@ Target operating state from the README:
 - `DONE` Historical NSE and BSE bhavcopy fetch/build commands exist.
 - `DONE` Raw NSE and BSE bhavcopy archives can be fetched into ignored local operator state.
 - `DONE` Raw NSE and BSE bhavcopies can be normalized into canonical parquet with identity adjustments.
+- `DONE` Historical fetch/build/verify/upload now use explicit format registry, raw fetch manifests, partition manifests, partition-wise verification, doctor reports, R2 sync checks, and upload guardrails.
 - `PARTIAL` R2 currently contains verified NSE history: 5,786,247 rows, 126 monthly partitions, 2016-01-01 to 2026-06-25. Full NSE 1994+ and BSE 2007+ bootstrap still requires local assembly, user audit approval, and one-time verified upload.
 - `PARTIAL` Delivery fields are nullable when the raw bhavcopy source does not include them.
 - `TODO` Corporate-action adjustment data is not integrated.
@@ -88,7 +89,7 @@ These are the active gaps between the documented target state and the current im
 
 ## Immediate Next Milestones
 
-1. Run local full-history NSE+BSE assembly and inspect `history_audit`.
-2. Approve and run one-time verified `history-upload` to replace/extend R2 market data.
+1. Run `history-bootstrap --upload false` for local full-history NSE+BSE assembly and inspect `history_audit` plus `history_doctor`.
+2. Approve and run one-time guarded `history-upload` to replace/extend R2 market data.
 3. Decide corporate-action adjustment source and method.
 4. Add an ML strategy execution type only after defining the feature/model/inference contract.

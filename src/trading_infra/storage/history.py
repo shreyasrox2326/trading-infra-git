@@ -43,9 +43,9 @@ def _load_passing_audit(audit_path: str | Path) -> dict:
 
 def _validate_raw_fetch_manifest(path: str | Path) -> None:
     manifest = read_raw_fetch_manifest(path)
-    unresolved = manifest.filter(pl.col("status").is_in(["failed", "rate_limited"]))
+    unresolved = manifest.filter(pl.col("status").is_in(["expected", "missing", "failed", "rate_limited"]))
     if unresolved.height:
-        raise ValueError(f"Raw fetch manifest has unresolved failed/rate_limited rows: {path}")
+        raise ValueError(f"Raw fetch manifest has unresolved expected/missing/failed/rate_limited rows: {path}")
 
 
 def _validate_partition_manifest(path: str | Path) -> None:

@@ -13,6 +13,8 @@ This file is the navigation map for repo memory.
 - [Market data publishing](decisions/2026-06-28-market-data-publishing.md)
 - [Progress tracking](decisions/2026-06-28-progress-tracking.md)
 - [NSE legacy symbol identifier](decisions/2026-06-28-nse-legacy-symbol-identifier.md)
+- [Audit format and manifests](decisions/2026-06-29-audit-format-and-manifests.md)
+- [R2 budget thresholds](decisions/2026-06-29-r2-budget-thresholds.md)
 
 ## Session Logs
 
@@ -33,6 +35,7 @@ This file is the navigation map for repo memory.
 - [NSE rate limit handling](logs/2026-06-28-nse-rate-limit-handling.md)
 - [NSE fetch throttle tuning](logs/2026-06-28-nse-fetch-throttle-tuning.md)
 - [Empty bhavcopy cache guard](logs/2026-06-28-empty-bhavcopy-cache-guard.md)
+- [Audit implementation](logs/2026-06-29-audit-implementation.md)
 
 ## Open Questions
 
