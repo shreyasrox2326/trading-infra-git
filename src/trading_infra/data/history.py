@@ -9,6 +9,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import polars as pl
@@ -36,6 +37,7 @@ class HistoryBuildResult:
     partitions: int
     skipped_non_bhavcopy: int
     exchanges: list[str]
+    manifest_path: Path
 
 
 class HistoryBuildLogger:
@@ -192,16 +194,35 @@ def _normalize_exchange_files_to_fragments(
     return processed, skipped
 
 
-def _merge_fragment_partitions(*, fragments_root: Path, output_root: Path, logger: HistoryBuildLogger) -> tuple[int, int]:
+def _partition_manifest_path(output_root: Path) -> Path:
+    return output_root.parent / "manifests" / "partition_manifest.parquet"
+
+
+def _partition_identity(path: Path) -> tuple[str, int, int]:
+    parts = {part.split("=", 1)[0]: part.split("=", 1)[1] for part in path.parts[-3:]}
+    return parts["exchange"], int(parts["year"]), int(parts["month"])
+
+
+def _write_partition_manifest(manifest_rows: list[dict[str, Any]], output_root: Path) -> Path:
+    manifest_path = _partition_manifest_path(output_root)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(manifest_rows).write_parquet(manifest_path)
+    return manifest_path
+
+
+def _merge_fragment_partitions(
+    *,
+    fragments_root: Path,
+    output_root: Path,
+    logger: HistoryBuildLogger,
+) -> tuple[int, int, list[dict[str, Any]]]:
     partition_dirs = sorted(path for path in fragments_root.glob("exchange=*/year=*/month=*") if path.is_dir())
     rows = 0
+    manifest_rows: list[dict[str, Any]] = []
     logger.write(f"phase=merge_start partitions={len(partition_dirs)}")
     for index, partition_dir in enumerate(partition_dirs, start=1):
         files = sorted(partition_dir.glob("fragment-*.parquet"))
-        parts = {part.split("=", 1)[0]: part.split("=", 1)[1] for part in partition_dir.parts[-3:]}
-        exchange = parts["exchange"]
-        year = int(parts["year"])
-        month = int(parts["month"])
+        exchange, year, month = _partition_identity(partition_dir)
         logger.write(
             f"phase=merge_partition_start index={index}/{len(partition_dirs)} exchange={exchange} "
             f"year={year} month={month:02d} fragments={len(files)}"
@@ -221,14 +242,34 @@ def _merge_fragment_partitions(*, fragments_root: Path, output_root: Path, logge
         frame = frame.sort(["date", "exchange", "symbol", "isin", "series"])
         output_dir = output_root / f"exchange={exchange}" / f"year={year}" / f"month={month:02d}"
         output_dir.mkdir(parents=True, exist_ok=True)
-        frame.write_parquet(output_dir / "part.parquet")
+        output_file = output_dir / "part.parquet"
+        frame.write_parquet(output_file)
         rows += frame.height
+        manifest_rows.append(
+            {
+                "exchange": exchange,
+                "year": year,
+                "month": month,
+                "partition_path": output_file.as_posix(),
+                "row_count": frame.height,
+                "min_date": frame.get_column("date").min(),
+                "max_date": frame.get_column("date").max(),
+                "symbols": frame.get_column("symbol").n_unique(),
+                "file_size_bytes": output_file.stat().st_size,
+                "sha256": _file_sha256(output_file),
+                "source_raw_count": len(files),
+                "parser_versions": "bhavcopy",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "verified_at": None,
+                "status": "built",
+            }
+        )
         logger.write(
             f"phase=merge_partition_done index={index}/{len(partition_dirs)} exchange={exchange} "
             f"year={year} month={month:02d} rows={frame.height}"
         )
     logger.write(f"phase=merge_done partitions={len(partition_dirs)} rows={rows}")
-    return rows, len(partition_dirs)
+    return rows, len(partition_dirs), manifest_rows
 
 
 def _resolve_history_output_path(output_path: str | Path) -> Path:
@@ -260,18 +301,84 @@ def build_history_partitions(
     workers: int = 1,
     show_progress: bool = False,
     log_path: str | Path | None = None,
+    clean: bool = True,
+    incremental: bool = False,
+    only_missing: bool = False,
+    repair_partition: tuple[str, int, int] | None = None,
 ) -> HistoryBuildResult:
     """Build canonical monthly history parquet partitions from raw bhavcopy files."""
     input_root = Path(input_path)
     output_root = _resolve_history_output_path(output_path)
     logger = HistoryBuildLogger(log_path)
+    selected_partition = (
+        (repair_partition[0].upper(), int(repair_partition[1]), int(repair_partition[2]))
+        if repair_partition
+        else None
+    )
+    update_mode = incremental or only_missing or selected_partition is not None
     logger.write(
         f"phase=build_start input_path={input_root} output_path={output_root} "
-        f"workers={workers} exchanges={_normalize_exchanges(exchanges)}"
+        f"workers={workers} exchanges={_normalize_exchanges(exchanges)} clean={clean} "
+        f"incremental={incremental} only_missing={only_missing} repair_partition={selected_partition}"
     )
 
-    if output_root.exists():
+    if output_root.exists() and clean:
         shutil.rmtree(output_root)
+    if output_root.exists() and not clean and not update_mode:
+        raise FileExistsError(f"History output exists; pass --clean, --incremental, --only-missing, or --repair-partition: {output_root}")
+
+    with TemporaryDirectory() as tmpdir:
+        build_root = Path(tmpdir) / "history-build" if update_mode else output_root
+        build_root.mkdir(parents=True, exist_ok=True)
+        result = _build_history_partitions_into(
+            input_root=input_root,
+            output_root=build_root,
+            exchanges=exchanges,
+            workers=workers,
+            show_progress=show_progress,
+            logger=logger,
+        )
+        if update_mode:
+            output_root.mkdir(parents=True, exist_ok=True)
+            copied_manifest_rows = _copy_built_partitions(
+                source_root=build_root,
+                output_root=output_root,
+                only_missing=only_missing,
+                selected_partition=selected_partition,
+            )
+            manifest_path = _write_partition_manifest(copied_manifest_rows, output_root)
+            rows = sum(int(row["row_count"]) for row in copied_manifest_rows)
+            partitions = len(copied_manifest_rows)
+        else:
+            rows = result.rows
+            partitions = result.partitions
+            manifest_path = result.manifest_path
+
+    logger.write(
+        f"phase=build_done output_path={output_root} rows={rows} partitions={partitions} "
+        f"skipped_non_bhavcopy={result.skipped_non_bhavcopy}"
+    )
+    return HistoryBuildResult(
+        output_path=output_root,
+        log_path=logger.path,
+        rows=rows,
+        partitions=partitions,
+        skipped_non_bhavcopy=result.skipped_non_bhavcopy,
+        exchanges=result.exchanges,
+        manifest_path=manifest_path,
+    )
+
+
+def _build_history_partitions_into(
+    *,
+    input_root: Path,
+    output_root: Path,
+    exchanges: list[str] | None,
+    workers: int,
+    show_progress: bool,
+    logger: HistoryBuildLogger,
+) -> HistoryBuildResult:
+    """Build canonical monthly history parquet partitions into output_root."""
     output_root.mkdir(parents=True, exist_ok=True)
     fragments_root = output_root / "_fragments"
     fragments_root.mkdir(parents=True, exist_ok=True)
@@ -298,16 +405,13 @@ def build_history_partitions(
     if not built_exchanges:
         raise FileNotFoundError(f"No bhavcopy inputs found under: {input_root}")
 
-    rows, partitions = _merge_fragment_partitions(
+    rows, partitions, manifest_rows = _merge_fragment_partitions(
         fragments_root=fragments_root,
         output_root=output_root,
         logger=logger,
     )
     shutil.rmtree(fragments_root)
-    logger.write(
-        f"phase=build_done output_path={output_root} rows={rows} partitions={partitions} "
-        f"skipped_non_bhavcopy={skipped}"
-    )
+    manifest_path = _write_partition_manifest(manifest_rows, output_root)
     return HistoryBuildResult(
         output_path=output_root,
         log_path=logger.path,
@@ -315,7 +419,38 @@ def build_history_partitions(
         partitions=partitions,
         skipped_non_bhavcopy=skipped,
         exchanges=built_exchanges,
+        manifest_path=manifest_path,
     )
+
+
+def _copy_built_partitions(
+    *,
+    source_root: Path,
+    output_root: Path,
+    only_missing: bool,
+    selected_partition: tuple[str, int, int] | None,
+) -> list[dict[str, Any]]:
+    source_manifest = pl.read_parquet(_partition_manifest_path(source_root))
+    rows: list[dict[str, Any]] = []
+    for row in source_manifest.iter_rows(named=True):
+        key = (row["exchange"], int(row["year"]), int(row["month"]))
+        if selected_partition is not None and key != selected_partition:
+            continue
+        source_file = Path(row["partition_path"])
+        relative = source_file.relative_to(source_root)
+        target_file = output_root / relative
+        if only_missing and target_file.exists():
+            continue
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target_file)
+        updated = dict(row)
+        updated["partition_path"] = target_file.as_posix()
+        updated["file_size_bytes"] = target_file.stat().st_size
+        updated["sha256"] = _file_sha256(target_file)
+        rows.append(updated)
+    if selected_partition is not None and not rows:
+        raise FileNotFoundError(f"Repair partition was not produced: {selected_partition}")
+    return rows
 
 
 def build_history_parquet(

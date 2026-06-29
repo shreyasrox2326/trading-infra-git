@@ -90,6 +90,7 @@ python -m trading_infra history-build \
   --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
   --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
   --workers 4 \
+  --clean \
   --log-path /workspaces/code/trading-infra-git/data/import/history-build.log
 ```
 
@@ -106,6 +107,8 @@ It shows progress by default and writes timestamped phase logs. Monitor a long r
 ```bash
 tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-build.log
 ```
+
+`history-build` writes `data/import/manifests/partition_manifest.parquet`. Use `--clean` for an explicit destructive rebuild. Use `--incremental`, `--only-missing`, or `--repair-partition EXCHANGE YEAR MONTH` to update existing output without deleting unrelated partitions.
 
 Current ingestion uses identity adjustment:
 

@@ -9,6 +9,7 @@ from trading_infra.data.bhavcopy import BhavcopyFetchResult
 from trading_infra.data.fetch_manifest import write_raw_fetch_manifest
 from trading_infra.data.history import (
     build_history_parquet,
+    build_history_partitions,
     verify_history_frame,
     verify_history_partitions,
     write_history_audit,
@@ -68,6 +69,25 @@ def test_build_history_parquet_combines_exchange_subdirectories(tmp_path) -> Non
     assert output == tmp_path / "daily_stock_data_full"
     assert (output / "exchange=NSE" / "year=2026" / "month=01" / "part.parquet").exists()
     assert (output / "exchange=BSE" / "year=2026" / "month=01" / "part.parquet").exists()
+    manifest = pl.read_parquet(tmp_path / "manifests" / "partition_manifest.parquet")
+    assert set(manifest.get_column("exchange").to_list()) == {"NSE", "BSE"}
+    assert set(manifest.columns) >= {
+        "exchange",
+        "year",
+        "month",
+        "partition_path",
+        "row_count",
+        "min_date",
+        "max_date",
+        "symbols",
+        "file_size_bytes",
+        "sha256",
+        "source_raw_count",
+        "parser_versions",
+        "created_at",
+        "verified_at",
+        "status",
+    }
     assert frame.columns == list(DAILY_STOCK_DATA_COLUMNS)
     assert frame.get_column("exchange").to_list() == ["BSE", "NSE"]
 
@@ -167,6 +187,55 @@ def test_build_history_parquet_preserves_nullable_delivery_and_identity_adjustme
     assert frame.get_column("adj_open").to_list() == frame.get_column("open").to_list()
     assert frame.get_column("adj_close").to_list() == frame.get_column("close").to_list()
     assert frame.get_column("adj_factor").to_list() == [1.0]
+
+
+def test_history_build_refuses_existing_output_without_update_mode(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [_nse_row()])
+    output = tmp_path / "daily_stock_data_full"
+    output.mkdir()
+
+    try:
+        build_history_partitions(
+            input_path=raw,
+            output_path=output,
+            exchanges=["NSE"],
+            clean=False,
+        )
+    except FileExistsError as exc:
+        assert "--clean" in str(exc)
+    else:
+        raise AssertionError("Expected existing-output failure.")
+
+
+def test_history_build_repair_partition_updates_only_selected_partition(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    jan = _nse_row()
+    feb = _nse_row()
+    feb["TIMESTAMP"] = "02-FEB-2026"
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [jan])
+    _write_zip(raw / "cm02FEB2026bhav.csv.zip", [feb])
+    output = tmp_path / "daily_stock_data_full"
+    build_history_partitions(input_path=raw, output_path=output, exchanges=["NSE"], clean=True)
+    jan_part = output / "exchange=NSE" / "year=2026" / "month=01" / "part.parquet"
+    jan_before = jan_part.read_bytes()
+
+    feb["CLOSE"] = 101.5
+    _write_zip(raw / "cm02FEB2026bhav.csv.zip", [feb])
+    result = build_history_partitions(
+        input_path=raw,
+        output_path=output,
+        exchanges=["NSE"],
+        clean=False,
+        repair_partition=("NSE", 2026, 2),
+    )
+
+    feb_frame = pl.read_parquet(output / "exchange=NSE" / "year=2026" / "month=02" / "part.parquet")
+    assert result.partitions == 1
+    assert jan_part.read_bytes() == jan_before
+    assert feb_frame.get_column("close").to_list() == [101.5]
 
 
 def test_verify_history_frame_rejects_invalid_ohlc() -> None:
@@ -302,6 +371,7 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
             "2",
             "--log-path",
             str(log_path),
+            "--clean",
             "--no-progress",
         ]
     )
@@ -324,6 +394,7 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
     assert "history-build" in captured
     assert "workers=2" in captured
     assert "log=" in captured
+    assert "manifest=" in captured
     assert "history-verify" in captured
     assert "verification_mode=partition-wise" in captured
     assert log_path.exists()

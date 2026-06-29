@@ -133,6 +133,11 @@ def build_parser() -> argparse.ArgumentParser:
     history_build.add_argument("--exchange", action="append")
     history_build.add_argument("--workers", type=int, default=4)
     history_build.add_argument("--log-path")
+    history_build.add_argument("--clean", action="store_true")
+    history_build.add_argument("--incremental", action="store_true")
+    history_build.add_argument("--only-missing", action="store_true")
+    history_build.add_argument("--repair-partition", nargs=3, metavar=("EXCHANGE", "YEAR", "MONTH"))
+    history_build.add_argument("--from-manifest")
     history_build.add_argument("--progress", action="store_true", default=True)
     history_build.add_argument("--no-progress", dest="progress", action="store_false")
 
@@ -431,6 +436,11 @@ def history_fetch(args: argparse.Namespace) -> int:
 
 
 def history_build(args: argparse.Namespace) -> int:
+    repair_partition = (
+        (args.repair_partition[0], int(args.repair_partition[1]), int(args.repair_partition[2]))
+        if args.repair_partition
+        else None
+    )
     result = build_history_partitions(
         input_path=args.input_path,
         output_path=args.output_path,
@@ -438,12 +448,18 @@ def history_build(args: argparse.Namespace) -> int:
         workers=args.workers,
         show_progress=args.progress,
         log_path=args.log_path,
+        clean=args.clean,
+        incremental=args.incremental,
+        only_missing=args.only_missing,
+        repair_partition=repair_partition,
     )
     print(
         f"history-build input_path={args.input_path} output_path={result.output_path.as_posix()} "
         f"rows={result.rows} partitions={result.partitions} exchanges={result.exchanges} "
         f"skipped_non_bhavcopy={result.skipped_non_bhavcopy} workers={args.workers} "
-        f"log={result.log_path.as_posix()}"
+        f"clean={args.clean} incremental={args.incremental} only_missing={args.only_missing} "
+        f"repair_partition={repair_partition} log={result.log_path.as_posix()} "
+        f"manifest={result.manifest_path.as_posix()}"
     )
     return 0
 
