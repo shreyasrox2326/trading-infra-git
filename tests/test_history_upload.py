@@ -138,6 +138,11 @@ def test_upload_verified_history_stages_then_promotes(monkeypatch, tmp_path) -> 
     assert "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet" in fake.objects
     assert "data/daily_stock_data/exchange=NSE/year=2026/month=01/old.parquet" not in fake.objects
     assert "data/daily_stock_data/_manifest.json" in fake.objects
+    manifest = json.loads(fake.objects["data/daily_stock_data/_manifest.json"].decode("utf-8"))
+    assert manifest["run_id"] == "test-run"
+    assert manifest["exchange_coverage"] == ["NSE"]
+    assert manifest["upload_status"] == "promoted"
+    assert manifest["partitions"][0]["rows"] == 1
     assert fake.uploaded_keys[0].startswith("_staging/history-load/test-run/")
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -57,6 +58,20 @@ def _write_partition(frame: pl.DataFrame, partition: MarketDataPartition, path: 
     )
 
 
+def _materialize_upload_partition(source_file: Path, partition: MarketDataPartition, target_path: Path) -> None:
+    frame = pl.read_parquet(source_file)
+    partition_frame = (
+        frame.filter(
+            (pl.col("exchange") == partition.exchange)
+            & (pl.col("date").dt.year() == partition.year)
+            & (pl.col("date").dt.month() == partition.month)
+        )
+        .select([pl.col(column) for column in DAILY_STOCK_DATA_COLUMNS])
+        .sort(["date", "exchange", "symbol", "isin", "series"])
+    )
+    partition_frame.write_parquet(target_path)
+
+
 def _verify_uploaded_size(client: R2Client, key: str, local_path: Path) -> None:
     with TemporaryDirectory() as tmpdir:
         downloaded = Path(tmpdir) / local_path.name
@@ -76,27 +91,27 @@ def upload_verified_history(
     """Upload verified canonical history through staging before canonical promotion."""
     _load_passing_audit(audit_path)
     selected_exchanges = [exchange.upper() for exchange in exchanges] if exchanges else None
-    frame = pl.read_parquet(resolve_history_parquet_files(path))
-    if selected_exchanges:
-        frame = frame.filter(pl.col("exchange").is_in(selected_exchanges))
-    if frame.is_empty():
-        raise ValueError("No rows available for selected historical upload exchanges.")
+    source_files = resolve_history_parquet_files(path)
 
     with TemporaryDirectory() as tmpdir:
         tmp_root = Path(tmpdir)
-        filtered_path = tmp_root / "filtered-history.parquet"
-        frame.write_parquet(filtered_path)
-        partitions = list_market_data_partitions([filtered_path])
         load_id = run_id or uuid4().hex
         local_partitions: list[tuple[MarketDataPartition, Path, str, str]] = []
 
-        for partition in partitions:
-            local_path = tmp_root / f"{partition.exchange}-{partition.year}-{partition.month:02d}.parquet"
-            staging_key = _staging_key(load_id, partition)
-            canonical_key = _partition_key(partition)
-            _write_partition(frame, partition, local_path)
-            client.upload_file(local_path, staging_key)
-            local_partitions.append((partition, local_path, staging_key, canonical_key))
+        for source_file in source_files:
+            partitions = list_market_data_partitions([source_file])
+            for partition in partitions:
+                if selected_exchanges and partition.exchange not in selected_exchanges:
+                    continue
+                local_path = tmp_root / f"{partition.exchange}-{partition.year}-{partition.month:02d}.parquet"
+                staging_key = _staging_key(load_id, partition)
+                canonical_key = _partition_key(partition)
+                _materialize_upload_partition(source_file, partition, local_path)
+                client.upload_file(local_path, staging_key)
+                local_partitions.append((partition, local_path, staging_key, canonical_key))
+
+        if not local_partitions:
+            raise ValueError("No rows available for selected historical upload exchanges.")
 
         for _partition, local_path, staging_key, _canonical_key in local_partitions:
             _verify_uploaded_size(client, staging_key, local_path)
@@ -123,9 +138,12 @@ def upload_verified_history(
 
         manifest = {
             "run_id": load_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "source_path": str(path),
             "audit_path": str(audit_path),
+            "exchange_coverage": sorted({result.exchange for result in results}),
             "partitions": [result.__dict__ for result in results],
+            "upload_status": "promoted",
         }
         client.upload_text("data/daily_stock_data/_manifest.json", json.dumps(manifest, indent=2) + "\n")
         return results

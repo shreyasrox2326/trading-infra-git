@@ -143,15 +143,15 @@ Target files:
 
 ### Phase 6: Streaming Upload And R2 Sync Visibility
 
-- `TODO` Refactor `upload_verified_history` to upload partition files directly instead of reading full history into one frame.
-- `TODO` Preserve staging, staged-size verification, canonical promotion, stale parquet cleanup, and manifest write.
+- `DONE` Refactor `upload_verified_history` to upload partition files directly instead of reading full history into one frame.
+- `DONE` Preserve staging, staged-size verification, canonical promotion, stale parquet cleanup, and manifest write.
 - `TODO` Add `r2-sync-check --exchange EXCHANGE`.
 - `TODO` Compare local partition manifest to R2 object existence, size, row count, and hash/etag where available.
 - `TODO` Include sync report fields: local partition path, R2 key, local row count, R2 row count, local file size, R2 file size, local SHA256 or etag-equivalent metadata, manifest entry, and status.
 - `TODO` Emit sync statuses such as `OK`, `MISSING`, `STALE`, and `EXTRA`.
 - `TODO` Block historical upload if sync check cannot be produced.
 - `TODO` Block historical upload unless source fetch manifest and partition audit pass.
-- `TODO` Expand R2 manifest at `data/daily_stock_data/_manifest.json` with run id, created timestamp, exchange coverage, partition list, row counts, file sizes, SHA256s if available, source local audit id, and upload status.
+- `PARTIAL` Expand R2 manifest at `data/daily_stock_data/_manifest.json` with run id, created timestamp, exchange coverage, partition list, row counts, file sizes, SHA256s if available, source local audit id, and upload status; current manifest includes run id, timestamp, exchange coverage, partition rows, source/audit path, and upload status, but not SHA256s yet.
 - `TODO` Add tests for partition-directory upload without combined-frame loading and sync mismatch reporting.
 
 Target files:

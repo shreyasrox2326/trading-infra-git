@@ -182,7 +182,7 @@ python -m trading_infra history-upload \
   --exchange BSE
 ```
 
-The upload path writes monthly canonical partitions locally, uploads them to `_staging/history-load/<run_id>/...`, verifies staged object sizes, then promotes canonical `part.parquet` files under `data/daily_stock_data/`. A manifest is written to `data/daily_stock_data/_manifest.json`.
+The upload path streams monthly canonical partition files, uploads them to `_staging/history-load/<run_id>/...`, verifies staged object sizes, then promotes canonical `part.parquet` files under `data/daily_stock_data/`. A manifest with run id, created timestamp, exchange coverage, partition rows, source path, audit path, and upload status is written to `data/daily_stock_data/_manifest.json`.
 
 Use `market-data-upload` only for explicit operator-controlled canonical parquet uploads. The full historical bootstrap should use `history-upload`.
 
