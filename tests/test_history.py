@@ -272,6 +272,7 @@ def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, ca
 
     monkeypatch.setattr("trading_infra.data.bhavcopy.urlopen", lambda *_args, **_kwargs: _Response())
     log_path = tmp_path / "fetch.log"
+    manifest_path = tmp_path / "raw_fetch_NSE.parquet"
 
     exit_code = main(
         [
@@ -290,6 +291,8 @@ def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, ca
             "0",
             "--log-path",
             str(log_path),
+            "--manifest-path",
+            str(manifest_path),
             "--no-progress",
         ]
     )
@@ -298,5 +301,13 @@ def test_history_fetch_cli_writes_log_and_uses_workers(monkeypatch, tmp_path, ca
     assert exit_code == 0
     assert "workers=2" in captured
     assert "retries=0" in captured
+    assert f"manifest={manifest_path.as_posix()}" in captured
     assert log_path.exists()
     assert "2026-01-01,downloaded" in log_path.read_text(encoding="utf-8")
+    manifest = pl.read_parquet(manifest_path)
+    assert manifest.select("exchange", "date", "expected_format_id", "status").rows() == [
+        ("NSE", date(2026, 1, 1), "nse_udiff_cm_bhavcopy_v1", "downloaded"),
+        ("NSE", date(2026, 1, 2), "nse_udiff_cm_bhavcopy_v1", "downloaded"),
+    ]
+    assert manifest.get_column("bytes").to_list() == [7, 7]
+    assert manifest.get_column("sha256").null_count() == 0

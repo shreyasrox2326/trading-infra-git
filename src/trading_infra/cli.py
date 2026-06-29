@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from typing import Sequence
 
 from trading_infra.data.bhavcopy import fetch_bhavcopy_archives, write_canonical_bhavcopy_parquet
+from trading_infra.data.fetch_manifest import default_raw_fetch_manifest_path, write_raw_fetch_manifest
 from trading_infra.data.formats import inspect_bhavcopy_format
 from trading_infra.data.history import build_history_parquet, build_history_partitions
 from trading_infra.data.history import write_history_audit
@@ -112,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     history_fetch.add_argument("--retry-sleep-seconds", type=float, default=1.0)
     history_fetch.add_argument("--request-sleep-seconds", type=float, default=0.0)
     history_fetch.add_argument("--log-path")
+    history_fetch.add_argument("--manifest-path")
     history_fetch.add_argument("--progress", action="store_true", default=True)
     history_fetch.add_argument("--no-progress", dest="progress", action="store_false")
 
@@ -384,11 +386,14 @@ def history_fetch(args: argparse.Namespace) -> int:
     counts: dict[str, int] = {}
     for result in results:
         counts[result.status] = counts.get(result.status, 0) + 1
+    manifest_path = Path(args.manifest_path) if args.manifest_path else default_raw_fetch_manifest_path(args.exchange)
+    write_raw_fetch_manifest(results, exchange=args.exchange, path=manifest_path)
     print(
         f"history-fetch exchange={args.exchange.upper()} start_date={args.start_date} "
         f"end_date={args.end_date} output_path={args.output_path} workers={args.workers} "
         f"retries={args.retries} retry_sleep_seconds={args.retry_sleep_seconds} "
-        f"request_sleep_seconds={args.request_sleep_seconds} counts={counts} log={log_path.as_posix()}"
+        f"request_sleep_seconds={args.request_sleep_seconds} counts={counts} "
+        f"log={log_path.as_posix()} manifest={manifest_path.as_posix()}"
     )
     return 1 if counts.get("failed", 0) or counts.get("rate_limited", 0) else 0
 

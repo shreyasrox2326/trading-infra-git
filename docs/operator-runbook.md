@@ -58,6 +58,14 @@ python -m trading_infra history-fetch \
 tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
 ```
 
+`history-fetch` also writes a raw fetch manifest parquet. By default it uses:
+
+```text
+data/import/manifests/raw_fetch_<EXCHANGE>.parquet
+```
+
+Override it with `--manifest-path`. The manifest records one row per expected weekday with the expected format id, expected filename, primary URL, local path, status, bytes, SHA256, last error, and parser hint.
+
 For NSE, `rate_limited` means the official archive returned HTTP 403. Stop the run, wait before retrying, and resume with low concurrency; do not continue a full-range run that is logging only `rate_limited` rows. NSE-facing bulk fetches should stay conservative: one worker plus roughly one second between requests.
 
 Build one canonical parquet locally:

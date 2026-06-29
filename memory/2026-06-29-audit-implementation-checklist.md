@@ -48,8 +48,8 @@ Status labels:
 ### Phase 1: Manifested Fetch Safety
 
 - `TODO` Add a manifest model for one row per expected trading weekday.
-- `TODO` Persist fetch manifests as `data/import/manifests/raw_fetch_NSE.parquet` and `data/import/manifests/raw_fetch_BSE.parquet`.
-- `TODO` Include fetch manifest columns: `exchange`, `date`, `expected_format_id`, `expected_filename`, `expected_url_primary`, `local_path`, `status`, `http_status`, `bytes`, `sha256`, `attempts`, `last_attempt_at`, `last_error`, and `parser_hint`.
+- `DONE` Persist fetch manifests as `data/import/manifests/raw_fetch_NSE.parquet` and `data/import/manifests/raw_fetch_BSE.parquet`.
+- `DONE` Include fetch manifest columns: `exchange`, `date`, `expected_format_id`, `expected_filename`, `expected_url_primary`, `local_path`, `status`, `http_status`, `bytes`, `sha256`, `attempts`, `last_attempt_at`, `last_error`, and `parser_hint`.
 - `TODO` Support fetch status values from the audit: `expected`, `downloaded`, `skipped_existing`, `not_available`, `holiday_or_no_session`, `rate_limited`, `failed`, `corrupt_html`, `parse_failed`, and `validated`.
 - `TODO` Add `history-fetch --only missing,rate_limited,failed` repair mode.
 - `TODO` Add `history-fetch --fail-fast-rate-limit-ratio <ratio>`.
