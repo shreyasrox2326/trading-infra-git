@@ -129,6 +129,9 @@ def build_parser() -> argparse.ArgumentParser:
     history_verify = subparsers.add_parser("history-verify", help="Verify canonical full-history market-data parquet.")
     history_verify.add_argument("--path", required=True)
     history_verify.add_argument("--report-path", required=True)
+    history_verify.add_argument("--partition-wise", action="store_true")
+    history_verify.add_argument("--streaming", action="store_true")
+    history_verify.add_argument("--max-memory-gb", type=float)
 
     history_upload = subparsers.add_parser("history-upload", help="Upload verified full-history market data to R2.")
     history_upload.add_argument("--path", required=True)
@@ -421,6 +424,7 @@ def history_verify(args: argparse.Namespace) -> int:
     print(
         f"history-verify path={args.path} report_path={args.report_path} "
         f"passed={str(audit['passed']).lower()} rows={audit['rows']} "
+        f"partitions={audit['partitions']} verification_mode={audit['verification_mode']} "
         f"duplicate_key_count={audit['duplicate_key_count']} invalid_ohlc_count={audit['invalid_ohlc_count']}"
     )
     return 0 if audit["passed"] else 1

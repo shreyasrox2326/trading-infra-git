@@ -123,10 +123,11 @@ Verify before any R2 historical replacement:
 ```bash
 python -m trading_infra history-verify \
   --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
-  --report-path /workspaces/code/trading-infra-git/data/import/history_audit.json
+  --report-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
+  --partition-wise
 ```
 
-Inspect `history_audit.json` and `history_audit.md`. Confirm:
+`history-verify` verifies monthly parquet files partition by partition and writes compact aggregate metadata instead of loading the full history into one frame. Inspect `history_audit.json` and `history_audit.md`. Confirm:
 
 - audit passed
 - accepted date ranges by exchange
@@ -135,6 +136,7 @@ Inspect `history_audit.json` and `history_audit.md`. Confirm:
 - invalid OHLC count is zero
 - negative volume/turnover counts are zero
 - identity adjustment is acceptable for this load
+- every `partition_summaries` entry has the expected row count, file size, and SHA256
 
 User approval is required before replacing or extending canonical R2 historical market data.
 

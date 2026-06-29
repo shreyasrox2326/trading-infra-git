@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from hashlib import sha256
 import json
 import shutil
 from dataclasses import dataclass
@@ -465,10 +466,143 @@ def verify_history_frame(frame: pl.DataFrame) -> dict[str, Any]:
     }
 
 
+def _file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _merge_date_min(current: date | None, candidate: date | None) -> date | None:
+    if current is None:
+        return candidate
+    if candidate is None:
+        return current
+    return min(current, candidate)
+
+
+def _merge_date_max(current: date | None, candidate: date | None) -> date | None:
+    if current is None:
+        return candidate
+    if candidate is None:
+        return current
+    return max(current, candidate)
+
+
+def verify_history_partitions(files: list[Path]) -> dict[str, Any]:
+    """Verify history parquet files one partition at a time."""
+    rows = 0
+    missing_columns: set[str] = set()
+    unexpected_columns: set[str] = set()
+    required_null_columns: set[str] = set()
+    null_counts = {column: 0 for column in DAILY_STOCK_DATA_COLUMNS}
+    duplicate_key_count = 0
+    invalid_ohlc_count = 0
+    negative_volume_count = 0
+    negative_turnover_count = 0
+    exchange_stats: dict[str, dict[str, Any]] = {}
+    dates_by_exchange: dict[str, set[date]] = {}
+    by_month: list[dict[str, Any]] = []
+    partition_summaries: list[dict[str, Any]] = []
+
+    for file in files:
+        frame = pl.read_parquet(file)
+        audit = verify_history_frame(frame)
+        rows += int(audit["rows"])
+        missing_columns.update(audit["missing_columns"])
+        unexpected_columns.update(audit["unexpected_columns"])
+        required_null_columns.update(audit["required_null_columns"])
+        for column, count in audit["null_counts"].items():
+            null_counts[column] = null_counts.get(column, 0) + int(count)
+        duplicate_key_count += int(audit["duplicate_key_count"])
+        invalid_ohlc_count += int(audit["invalid_ohlc_count"])
+        negative_volume_count += int(audit["negative_volume_count"])
+        negative_turnover_count += int(audit["negative_turnover_count"])
+        by_month.extend(audit["by_month"])
+
+        if not audit["missing_columns"] and frame.height:
+            for row in audit["by_exchange"]:
+                exchange = row["exchange"]
+                stats = exchange_stats.setdefault(
+                    exchange,
+                    {"exchange": exchange, "rows": 0, "date_min": None, "date_max": None, "symbols": set()},
+                )
+                stats["rows"] += int(row["rows"])
+                stats["date_min"] = _merge_date_min(stats["date_min"], row["date_min"])
+                stats["date_max"] = _merge_date_max(stats["date_max"], row["date_max"])
+                stats["symbols"].update(
+                    frame.filter(pl.col("exchange") == exchange).get_column("symbol").unique().to_list()
+                )
+                dates_by_exchange.setdefault(exchange, set()).update(
+                    frame.filter(pl.col("exchange") == exchange).get_column("date").unique().to_list()
+                )
+
+        partition_summaries.append(
+            {
+                "path": file.as_posix(),
+                "passed": audit["passed"],
+                "rows": audit["rows"],
+                "file_size_bytes": file.stat().st_size,
+                "sha256": _file_sha256(file),
+                "missing_columns": audit["missing_columns"],
+                "unexpected_columns": audit["unexpected_columns"],
+                "duplicate_key_count": audit["duplicate_key_count"],
+                "invalid_ohlc_count": audit["invalid_ohlc_count"],
+                "negative_volume_count": audit["negative_volume_count"],
+                "negative_turnover_count": audit["negative_turnover_count"],
+            }
+        )
+
+    by_exchange = []
+    for exchange in sorted(exchange_stats):
+        stats = exchange_stats[exchange]
+        by_exchange.append(
+            {
+                "exchange": exchange,
+                "rows": stats["rows"],
+                "date_min": stats["date_min"],
+                "date_max": stats["date_max"],
+                "symbols": len(stats["symbols"]),
+            }
+        )
+    missing_weekdays_by_exchange = {
+        exchange: _missing_weekdays(sorted(dates))
+        for exchange, dates in sorted(dates_by_exchange.items())
+    }
+    passed = not (
+        missing_columns
+        or unexpected_columns
+        or required_null_columns
+        or duplicate_key_count
+        or invalid_ohlc_count
+        or negative_volume_count
+        or negative_turnover_count
+    )
+    return {
+        "passed": passed,
+        "rows": rows,
+        "missing_columns": sorted(missing_columns),
+        "unexpected_columns": sorted(unexpected_columns),
+        "required_null_columns": sorted(required_null_columns),
+        "null_counts": null_counts,
+        "duplicate_key_count": duplicate_key_count,
+        "invalid_ohlc_count": invalid_ohlc_count,
+        "negative_volume_count": negative_volume_count,
+        "negative_turnover_count": negative_turnover_count,
+        "by_exchange": by_exchange,
+        "by_month": sorted(by_month, key=lambda row: (row["exchange"], row["year"], row["month"])),
+        "missing_weekdays_by_exchange": missing_weekdays_by_exchange,
+        "partition_summaries": partition_summaries,
+        "partitions": len(partition_summaries),
+        "identity_adjustment": True,
+        "verification_mode": "partition-wise",
+    }
+
+
 def write_history_audit(*, path: str | Path, report_path: str | Path) -> dict[str, Any]:
     """Verify a canonical history parquet and write JSON plus a short Markdown report."""
-    frame = pl.read_parquet(resolve_history_parquet_files(path))
-    audit = verify_history_frame(frame)
+    audit = verify_history_partitions(resolve_history_parquet_files(path))
     report = Path(report_path)
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(audit, indent=2, default=_json_default) + "\n", encoding="utf-8")
@@ -478,6 +612,8 @@ def write_history_audit(*, path: str | Path, report_path: str | Path) -> dict[st
         "",
         f"- passed: {audit['passed']}",
         f"- rows: {audit['rows']}",
+        f"- partitions: {audit['partitions']}",
+        f"- verification_mode: {audit['verification_mode']}",
         f"- duplicate_key_count: {audit['duplicate_key_count']}",
         f"- invalid_ohlc_count: {audit['invalid_ohlc_count']}",
         f"- negative_volume_count: {audit['negative_volume_count']}",

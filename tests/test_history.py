@@ -5,7 +5,12 @@ from zipfile import ZipFile
 import polars as pl
 
 from trading_infra.cli import main
-from trading_infra.data.history import build_history_parquet, verify_history_frame, write_history_audit
+from trading_infra.data.history import (
+    build_history_parquet,
+    verify_history_frame,
+    verify_history_partitions,
+    write_history_audit,
+)
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
 
 
@@ -218,8 +223,35 @@ def test_write_history_audit_writes_json_and_markdown(tmp_path) -> None:
     audit = write_history_audit(path=output, report_path=report)
 
     assert audit["passed"] is True
+    assert audit["verification_mode"] == "partition-wise"
+    assert audit["partitions"] == 1
+    assert audit["partition_summaries"][0]["sha256"]
     assert report.exists()
     assert report.with_suffix(".md").exists()
+
+
+def test_verify_history_partitions_aggregates_partition_summaries(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    row_jan = _nse_row()
+    row_feb = _nse_row()
+    row_feb["TIMESTAMP"] = "02-FEB-2026"
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [row_jan])
+    _write_zip(raw / "cm02FEB2026bhav.csv.zip", [row_feb])
+    output, _ = build_history_parquet(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full.parquet",
+        exchanges=["NSE"],
+    )
+    files = sorted(output.glob("exchange=*/year=*/month=*/part.parquet"))
+
+    audit = verify_history_partitions(files)
+
+    assert audit["passed"] is True
+    assert audit["rows"] == 2
+    assert audit["partitions"] == 2
+    assert [row["month"] for row in audit["by_month"]] == [1, 2]
+    assert all(row["sha256"] for row in audit["partition_summaries"])
 
 
 def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
@@ -246,7 +278,16 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
             "--no-progress",
         ]
     )
-    verify_code = main(["history-verify", "--path", str(output), "--report-path", str(report)])
+    verify_code = main(
+        [
+            "history-verify",
+            "--path",
+            str(output),
+            "--report-path",
+            str(report),
+            "--partition-wise",
+        ]
+    )
 
     captured = capsys.readouterr().out
     assert build_code == 0
@@ -255,6 +296,7 @@ def test_history_build_and_verify_cli(tmp_path, capsys) -> None:
     assert "workers=2" in captured
     assert "log=" in captured
     assert "history-verify" in captured
+    assert "verification_mode=partition-wise" in captured
     assert log_path.exists()
     assert "phase=build_start" in log_path.read_text(encoding="utf-8")
 

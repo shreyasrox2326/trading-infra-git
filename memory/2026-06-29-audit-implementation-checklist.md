@@ -88,11 +88,11 @@ Target files:
 
 ### Phase 3: Streaming History Verification
 
-- `TODO` Refactor `write_history_audit` to verify monthly partitions independently.
-- `TODO` Keep only compact partition summaries in memory.
-- `TODO` Include per-partition schema, dtypes, row count, min/max date, duplicate keys, nulls, invalid OHLC, negative values, symbol count, file size, and SHA256.
-- `TODO` Add cross-partition summaries without loading full history.
-- `TODO` Add `history-verify --partition-wise`.
+- `DONE` Refactor `write_history_audit` to verify monthly partitions independently.
+- `DONE` Keep only compact partition summaries in memory.
+- `PARTIAL` Include per-partition schema, dtypes, row count, min/max date, duplicate keys, nulls, invalid OHLC, negative values, symbol count, file size, and SHA256; first pass includes row count, file size, SHA256, duplicate keys, invalid OHLC, and negative value counts.
+- `DONE` Add cross-partition summaries without loading full history.
+- `DONE` Add `history-verify --partition-wise`.
 - `TODO` Add `history-verify --streaming` and `--max-memory-gb`; make partition-wise/streaming the documented default.
 - `TODO` Hard fail if estimated verification memory exceeds the configured cap.
 - `TODO` Add tests proving partition-directory verification does not require a combined frame.
