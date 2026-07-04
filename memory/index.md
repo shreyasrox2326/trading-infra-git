@@ -36,6 +36,7 @@ This file is the navigation map for repo memory.
 - [NSE fetch throttle tuning](logs/2026-06-28-nse-fetch-throttle-tuning.md)
 - [Empty bhavcopy cache guard](logs/2026-06-28-empty-bhavcopy-cache-guard.md)
 - [Audit implementation](logs/2026-06-29-audit-implementation.md)
+- [Operator friction and follow-ups](logs/2026-07-05-operator-friction-and-followups.md)
 
 ## Open Questions
 
