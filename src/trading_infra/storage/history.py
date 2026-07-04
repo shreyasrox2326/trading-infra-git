@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -11,6 +12,7 @@ from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 import polars as pl
+from tqdm import tqdm
 
 from trading_infra.data.history import resolve_history_parquet_files
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
@@ -32,6 +34,15 @@ class HistoryUploadResult:
     canonical_key: str
     file_size_bytes: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class _UploadCandidate:
+    partition: MarketDataPartition
+    source_file: Path
+    local_path: Path
+    staging_key: str
+    canonical_key: str
 
 
 def _load_passing_audit(audit_path: str | Path) -> dict:
@@ -110,6 +121,29 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _run_upload_tasks(
+    items: list,
+    worker,
+    *,
+    workers: int,
+    description: str,
+    show_progress: bool,
+) -> list:
+    if workers <= 1:
+        iterable = tqdm(items, desc=description, unit="partition") if show_progress else items
+        return [worker(item) for item in iterable]
+
+    results = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(worker, item) for item in items]
+        completed = as_completed(futures)
+        if show_progress:
+            completed = tqdm(completed, total=len(futures), desc=description, unit="partition")
+        for future in completed:
+            results.append(future.result())
+    return results
+
+
 def upload_verified_history(
     client: R2Client,
     *,
@@ -119,6 +153,8 @@ def upload_verified_history(
     run_id: str | None = None,
     raw_manifest_path: str | Path | None = None,
     partition_manifest_path: str | Path | None = None,
+    workers: int = 4,
+    show_progress: bool = True,
 ) -> list[HistoryUploadResult]:
     """Upload verified canonical history through staging before canonical promotion."""
     _load_passing_audit(audit_path)
@@ -134,7 +170,7 @@ def upload_verified_history(
     with TemporaryDirectory() as tmpdir:
         tmp_root = Path(tmpdir)
         load_id = run_id or uuid4().hex
-        local_partitions: list[tuple[MarketDataPartition, Path, str, str]] = []
+        candidates: list[_UploadCandidate] = []
 
         for source_file in source_files:
             partitions = list_market_data_partitions([source_file])
@@ -144,37 +180,62 @@ def upload_verified_history(
                 local_path = tmp_root / f"{partition.exchange}-{partition.year}-{partition.month:02d}.parquet"
                 staging_key = _staging_key(load_id, partition)
                 canonical_key = _partition_key(partition)
-                _materialize_upload_partition(source_file, partition, local_path)
-                client.upload_file(local_path, staging_key)
-                local_partitions.append((partition, local_path, staging_key, canonical_key))
+                candidates.append(_UploadCandidate(partition, source_file, local_path, staging_key, canonical_key))
 
-        if not local_partitions:
+        if not candidates:
             raise ValueError("No rows available for selected historical upload exchanges.")
 
-        for _partition, local_path, staging_key, _canonical_key in local_partitions:
-            _verify_uploaded_size(client, staging_key, local_path)
+        worker_count = max(1, workers)
 
-        results: list[HistoryUploadResult] = []
-        for partition, local_path, staging_key, canonical_key in local_partitions:
-            client.upload_file(local_path, canonical_key)
+        def stage(candidate: _UploadCandidate) -> _UploadCandidate:
+            _materialize_upload_partition(candidate.source_file, candidate.partition, candidate.local_path)
+            client.upload_file(candidate.local_path, candidate.staging_key)
+            return candidate
+
+        staged = _run_upload_tasks(
+            candidates,
+            stage,
+            workers=worker_count,
+            description="history-upload stage",
+            show_progress=show_progress,
+        )
+
+        _run_upload_tasks(
+            staged,
+            lambda candidate: _verify_uploaded_size(client, candidate.staging_key, candidate.local_path),
+            workers=worker_count,
+            description="history-upload verify",
+            show_progress=show_progress,
+        )
+
+        def promote(candidate: _UploadCandidate) -> HistoryUploadResult:
+            partition = candidate.partition
+            client.upload_file(candidate.local_path, candidate.canonical_key)
             stale_keys = [
                 key
                 for key in client.list_keys(partition.prefix)
-                if key.endswith(".parquet") and key != canonical_key
+                if key.endswith(".parquet") and key != candidate.canonical_key
             ]
             client.delete_keys(stale_keys)
-            results.append(
-                HistoryUploadResult(
-                    exchange=partition.exchange,
-                    year=partition.year,
-                    month=partition.month,
-                    rows=partition.rows,
-                    staging_key=staging_key,
-                    canonical_key=canonical_key,
-                    file_size_bytes=local_path.stat().st_size,
-                    sha256=_sha256(local_path),
-                )
+            return HistoryUploadResult(
+                exchange=partition.exchange,
+                year=partition.year,
+                month=partition.month,
+                rows=partition.rows,
+                staging_key=candidate.staging_key,
+                canonical_key=candidate.canonical_key,
+                file_size_bytes=candidate.local_path.stat().st_size,
+                sha256=_sha256(candidate.local_path),
             )
+
+        results = _run_upload_tasks(
+            staged,
+            promote,
+            workers=worker_count,
+            description="history-upload promote",
+            show_progress=show_progress,
+        )
+        results = sorted(results, key=lambda result: (result.exchange, result.year, result.month))
 
         manifest = {
             "run_id": load_id,

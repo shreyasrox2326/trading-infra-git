@@ -227,10 +227,11 @@ python -m trading_infra history-upload \
   --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
   --partition-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/partition_manifest.parquet \
   --exchange NSE \
-  --exchange BSE
+  --exchange BSE \
+  --workers 8
 ```
 
-The upload path streams monthly canonical partition files, uploads them to `_staging/history-load/<run_id>/...`, verifies staged object sizes, then promotes canonical `part.parquet` files under `data/daily_stock_data/`. A manifest with run id, created timestamp, exchange coverage, partition rows, source path, audit path, and upload status is written to `data/daily_stock_data/_manifest.json`.
+The upload path streams monthly canonical partition files, uploads them to `_staging/history-load/<run_id>/...`, verifies staged object sizes, then promotes canonical `part.parquet` files under `data/daily_stock_data/`. Staging, verification, and promotion run with bounded parallelism controlled by `--workers` and show progress bars by default. A manifest with run id, created timestamp, exchange coverage, partition rows, source path, audit path, and upload status is written to `data/daily_stock_data/_manifest.json`.
 
 Use `market-data-upload` only for explicit operator-controlled canonical parquet uploads. The full historical bootstrap should use `history-upload`.
 
