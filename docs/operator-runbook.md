@@ -55,9 +55,9 @@ python -m trading_infra history-fetch \
   --end-date YYYY-MM-DD \
   --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
   --workers 1 \
-  --retries 5 \
-  --retry-sleep-seconds 60 \
-  --request-sleep-seconds 1 \
+  --retries 1 \
+  --retry-sleep-seconds 1 \
+  --request-sleep-seconds 0.5 \
   --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
 
 python -m trading_infra history-fetch \
@@ -66,7 +66,9 @@ python -m trading_infra history-fetch \
   --end-date YYYY-MM-DD \
   --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/BSE \
   --workers 8 \
-  --retries 3 \
+  --retries 1 \
+  --retry-sleep-seconds 1 \
+  --request-sleep-seconds 0.5 \
   --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-bse.log
 ```
 

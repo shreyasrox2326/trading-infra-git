@@ -119,7 +119,7 @@ def fetch_bhavcopy_archive(
     exchange: str = "NSE",
     overwrite: bool = False,
     timeout_seconds: int = 30,
-    retries: int = 3,
+    retries: int = 1,
     retry_sleep_seconds: float = 1.0,
 ) -> BhavcopyFetchResult:
     """Fetch one exchange equity bhavcopy archive into local operator state."""
@@ -186,9 +186,9 @@ def fetch_bhavcopy_archives(
     exchange: str = "NSE",
     overwrite: bool = False,
     workers: int = 1,
-    retries: int = 3,
+    retries: int = 1,
     retry_sleep_seconds: float = 1.0,
-    request_sleep_seconds: float = 0.0,
+    request_sleep_seconds: float = 0.5,
     timeout_seconds: int = 30,
     show_progress: bool = False,
     on_result: Callable[[BhavcopyFetchResult], None] | None = None,

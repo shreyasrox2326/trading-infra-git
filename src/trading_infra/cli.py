@@ -114,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     bhavcopy_fetch.add_argument("--log-path")
     bhavcopy_fetch.add_argument("--overwrite", action="store_true")
     bhavcopy_fetch.add_argument("--workers", type=int, default=1)
-    bhavcopy_fetch.add_argument("--retries", type=int, default=3)
+    bhavcopy_fetch.add_argument("--retries", type=int, default=1)
     bhavcopy_fetch.add_argument("--progress", action="store_true")
 
     bhavcopy_ingest = subparsers.add_parser(
@@ -132,9 +132,9 @@ def build_parser() -> argparse.ArgumentParser:
     history_fetch.add_argument("--output-path", required=True)
     history_fetch.add_argument("--overwrite", action="store_true")
     history_fetch.add_argument("--workers", type=int, default=1)
-    history_fetch.add_argument("--retries", type=int, default=3)
+    history_fetch.add_argument("--retries", type=int, default=1)
     history_fetch.add_argument("--retry-sleep-seconds", type=float, default=1.0)
-    history_fetch.add_argument("--request-sleep-seconds", type=float, default=0.0)
+    history_fetch.add_argument("--request-sleep-seconds", type=float, default=0.5)
     history_fetch.add_argument("--log-path")
     history_fetch.add_argument("--manifest-path")
     history_fetch.add_argument("--only")
@@ -184,8 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
     history_bootstrap.add_argument("--resume", action="store_true")
     history_bootstrap.add_argument("--upload", choices=["true", "false"], default="false")
     history_bootstrap.add_argument("--workers", type=int, default=1)
-    history_bootstrap.add_argument("--retries", type=int, default=3)
-    history_bootstrap.add_argument("--request-sleep-seconds", type=float, default=0.0)
+    history_bootstrap.add_argument("--retries", type=int, default=1)
+    history_bootstrap.add_argument("--request-sleep-seconds", type=float, default=0.5)
     history_bootstrap.add_argument("--retry-sleep-seconds", type=float, default=1.0)
     history_bootstrap.add_argument("--max-memory-gb", type=float)
 
