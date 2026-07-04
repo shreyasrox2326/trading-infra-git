@@ -39,12 +39,19 @@ Both commands write timestamped snapshots under `data/import/audit/r2_usage/`. `
 
 Fetch raw bhavcopy files into ignored local operator state. Run long downloads inside `tmux` and keep the per-date status log under `data/import/` or `data/raw/`.
 
+Verified parseable local raw bhavcopy coverage currently starts at:
+
+- NSE: 1994-11-03 (`data/raw/bhavcopy/NSE/cm03NOV1994bhav.csv.zip`)
+- BSE: 2007-01-02 (`data/raw/bhavcopy/BSE/EQ020107_CSV.ZIP`)
+
+There is a local BSE raw file dated 2007-01-01, but it is an HTML/non-bhavcopy payload, so it is not counted as data coverage. Use earlier start dates only when intentionally probing archive gaps; otherwise use the verified parseable starts above for normal full-history bootstrap runs.
+
 ```bash
 tmux new -s history-fetch
 
 python -m trading_infra history-fetch \
   --exchange NSE \
-  --start-date 1994-01-01 \
+  --start-date 1994-11-03 \
   --end-date YYYY-MM-DD \
   --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
   --workers 1 \
@@ -55,7 +62,7 @@ python -m trading_infra history-fetch \
 
 python -m trading_infra history-fetch \
   --exchange BSE \
-  --start-date 2007-01-01 \
+  --start-date 2007-01-02 \
   --end-date YYYY-MM-DD \
   --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/BSE \
   --workers 8 \
@@ -97,7 +104,7 @@ For a single-command local bootstrap, keep upload disabled until the local repor
 ```bash
 python -m trading_infra history-bootstrap \
   --exchange NSE \
-  --start-date 1994-01-01 \
+  --start-date 1994-11-03 \
   --end-date YYYY-MM-DD \
   --raw-output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
   --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
