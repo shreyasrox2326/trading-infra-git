@@ -41,6 +41,22 @@ FETCH_STATUS_VALUES: tuple[str, ...] = (
     "validated",
     "missing",
 )
+FETCH_MANIFEST_SCHEMA: dict[str, pl.DataType] = {
+    "exchange": pl.String,
+    "date": pl.Date,
+    "expected_format_id": pl.String,
+    "expected_filename": pl.String,
+    "expected_url_primary": pl.String,
+    "local_path": pl.String,
+    "status": pl.String,
+    "http_status": pl.Int64,
+    "bytes": pl.Int64,
+    "sha256": pl.String,
+    "attempts": pl.Int64,
+    "last_attempt_at": pl.Datetime(time_zone="UTC"),
+    "last_error": pl.String,
+    "parser_hint": pl.String,
+}
 
 
 def default_raw_fetch_manifest_path(exchange: str) -> Path:
@@ -83,7 +99,7 @@ def build_raw_fetch_manifest(results: list[BhavcopyFetchResult], *, exchange: st
                 "parser_hint": expected_format.parser,
             }
         )
-    return pl.DataFrame(rows).select(FETCH_MANIFEST_COLUMNS)
+    return pl.DataFrame(rows, schema=FETCH_MANIFEST_SCHEMA).select(FETCH_MANIFEST_COLUMNS)
 
 
 def read_raw_fetch_manifest(path: str | Path) -> pl.DataFrame:
@@ -95,7 +111,7 @@ def read_raw_fetch_manifest(path: str | Path) -> pl.DataFrame:
     missing = [column for column in FETCH_MANIFEST_COLUMNS if column not in manifest.columns]
     if missing:
         raise ValueError(f"Raw fetch manifest is missing columns: {missing}")
-    return manifest.select(FETCH_MANIFEST_COLUMNS)
+    return manifest.select(FETCH_MANIFEST_COLUMNS).cast(FETCH_MANIFEST_SCHEMA)
 
 
 def select_manifest_dates(path: str | Path, *, statuses: set[str]) -> list:

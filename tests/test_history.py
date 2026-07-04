@@ -280,6 +280,30 @@ def test_history_build_from_manifest_uses_listed_raw_files(tmp_path) -> None:
     assert "cm02JAN2026bhav" in manifest.get_column("source_raw_files").item()
 
 
+def test_raw_fetch_manifest_handles_skipped_rows_before_network_rows(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    skipped = raw / "EQ020126_CSV.ZIP"
+    downloaded = raw / "EQ050126_CSV.ZIP"
+    skipped.write_bytes(b"old")
+    downloaded.write_bytes(b"new")
+    raw_manifest = tmp_path / "raw_fetch_BSE.parquet"
+
+    write_raw_fetch_manifest(
+        [
+            BhavcopyFetchResult(date(2026, 1, 2), "skipped_existing", skipped),
+            BhavcopyFetchResult(date(2026, 1, 5), "downloaded", downloaded, network_requested=True),
+        ],
+        exchange="BSE",
+        path=raw_manifest,
+    )
+
+    manifest = pl.read_parquet(raw_manifest).sort("date")
+    assert manifest.get_column("status").to_list() == ["skipped_existing", "downloaded"]
+    assert manifest.get_column("last_attempt_at").dtype == pl.Datetime(time_zone="UTC")
+    assert manifest.get_column("last_attempt_at").null_count() == 1
+
+
 def test_history_doctor_reports_local_health(tmp_path) -> None:
     raw = tmp_path / "raw"
     raw.mkdir()
