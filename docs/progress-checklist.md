@@ -56,7 +56,8 @@ Target operating state from the README:
 - `DONE` Local backtests work with local parquet inputs.
 - `DONE` R2-backed backtests now download strategy artifacts from R2 and use full prior history up to `end-date`.
 - `DONE` Backtest decisions can be validated and uploaded to R2.
-- `PARTIAL` Current runtime only supports one concrete strategy type: `top_n_adj_close`.
+- `DONE` Runtime supports public `top_n_adj_close` strategies and private pickle-backed `private_pickle_v1` strategies.
+- `DONE` Local backtests now load market data in chunks and reuse one precomputed private runtime per chunk for `private_pickle_v1`.
 
 ### Phase 4: Daily Paper Automation
 
@@ -65,14 +66,15 @@ Target operating state from the README:
 - `DONE` R2-backed paper runs use full prior market history up to the decision date.
 - `DONE` The workflow refreshes market data on R2 before paper evaluation.
 - `DONE` Automated daily market-data refresh is wired into GitHub Actions.
+- `DONE` The workflow now refreshes realized paper performance daily through `performance-refresh`.
 
 ### Phase 5: ML Strategy Readiness
 
 - `DONE` Storage contract allows `model.pkl` and `feature_config.yaml`.
 - `DONE` Strategy artifact upload supports optional model and feature-config files.
-- `TODO` Strategy builder/runtime does not load or execute any ML strategy type.
-- `TODO` No feature generation, model loading, or inference contract exists in code.
-- `TODO` No backtest or paper tests cover ML strategies.
+- `DONE` Strategy builder/runtime loads and executes `private_pickle_v1` artifacts through a stable in-process runtime contract.
+- `DONE` Public runtime now exposes reusable market-data and precomputed feature-table access for private strategies.
+- `DONE` Targeted tests cover mock private strategy loading, local paper execution, mocked R2-backed paper execution/upload, and cloud-side performance refresh wiring.
 
 ## Current Misalignments Against README Target
 
@@ -81,8 +83,8 @@ These are the active gaps between the documented target state and the current im
 1. Full historical bootstrap is not complete on R2.
    The local build/verify/upload commands exist, but the user still needs to assemble full NSE 1994+ and BSE 2007+ data locally, inspect the audit, and approve the one-time R2 replacement.
 
-2. ML strategy execution is missing.
-   The README and strategy contract allow model artifacts, but runtime code only supports `top_n_adj_close`.
+2. Private strategy execution is narrow.
+   The runtime now supports `private_pickle_v1`, but the public contract is intentionally small and exposes only market-data slices plus trading dates.
 
 3. Corporate-action adjustment is identity-only.
    No corporate-action source or back-adjustment method has been selected.
@@ -92,4 +94,4 @@ These are the active gaps between the documented target state and the current im
 1. Run `history-bootstrap --upload false` for local full-history NSE+BSE assembly and inspect `history_audit` plus `history_doctor`.
 2. Approve and run one-time guarded `history-upload` to replace/extend R2 market data.
 3. Decide corporate-action adjustment source and method.
-4. Add an ML strategy execution type only after defining the feature/model/inference contract.
+4. Broaden the private runtime only when a real strategy needs another stable method.

@@ -1,6 +1,6 @@
 import json
 from datetime import date
-from hashlib import sha256
+from hashlib import md5
 from pathlib import Path
 
 import polars as pl
@@ -10,8 +10,18 @@ from trading_infra.data.bhavcopy import BhavcopyFetchResult
 from trading_infra.data.fetch_manifest import write_raw_fetch_manifest
 from trading_infra.storage.config import R2Config
 from trading_infra.storage.history import upload_verified_history
-from trading_infra.storage.r2 import R2Client
+from trading_infra.storage.r2 import DEFAULT_UPLOAD_PART_SIZE, R2Client, file_md5
 from trading_infra.storage.sync import check_r2_sync
+
+
+def _etag_for_bytes(payload: bytes, *, chunk_size: int = DEFAULT_UPLOAD_PART_SIZE) -> str:
+    if not payload:
+        return f'"{md5(b"").hexdigest()}"'
+    parts = [payload[start : start + chunk_size] for start in range(0, len(payload), chunk_size)]
+    if len(parts) == 1:
+        return f'"{md5(parts[0]).hexdigest()}"'
+    part_hashes = [md5(part).digest() for part in parts]
+    return f'"{md5(b"".join(part_hashes)).hexdigest()}-{len(parts)}"'
 
 
 class _FakePaginator:
@@ -30,6 +40,8 @@ class _FakeS3Client:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self.uploaded_keys: list[str] = []
+        self.copied_keys: list[tuple[str, str]] = []
+        self.download_calls = 0
 
     def put_object(self, Bucket, Key, Body, **_kwargs):
         self.objects[Key] = Body
@@ -39,11 +51,23 @@ class _FakeS3Client:
 
         return {"Body": BytesIO(self.objects[Key])}
 
+    def head_object(self, Bucket, Key):
+        return {
+            "ContentLength": len(self.objects[Key]),
+            "ETag": _etag_for_bytes(self.objects[Key]),
+            "LastModified": None,
+        }
+
     def upload_file(self, Filename, Bucket, Key):
         self.uploaded_keys.append(Key)
         self.objects[Key] = Path(Filename).read_bytes()
 
+    def copy_object(self, Bucket, CopySource, Key):
+        self.copied_keys.append((CopySource["Key"], Key))
+        self.objects[Key] = self.objects[CopySource["Key"]]
+
     def download_file(self, Bucket, Key, Filename):
+        self.download_calls += 1
         Path(Filename).parent.mkdir(parents=True, exist_ok=True)
         Path(Filename).write_bytes(self.objects[Key])
 
@@ -107,10 +131,6 @@ def _history_frame() -> pl.DataFrame:
     )
 
 
-def _file_sha256(path: Path) -> str:
-    return sha256(path.read_bytes()).hexdigest()
-
-
 def _write_partition_manifest(path: Path, partition_path: Path) -> None:
     pl.DataFrame(
         [
@@ -124,7 +144,7 @@ def _write_partition_manifest(path: Path, partition_path: Path) -> None:
                 "max_date": date(2026, 1, 2),
                 "symbols": 1,
                 "file_size_bytes": partition_path.stat().st_size,
-                "sha256": _file_sha256(partition_path),
+                "md5": file_md5(partition_path),
                 "source_raw_count": 1,
                 "parser_versions": "bhavcopy",
                 "created_at": "2026-06-29T00:00:00",
@@ -193,6 +213,43 @@ def test_upload_verified_history_stages_then_promotes(monkeypatch, tmp_path) -> 
     assert manifest["upload_status"] == "promoted"
     assert manifest["partitions"][0]["rows"] == 1
     assert fake.uploaded_keys[0].startswith("_staging/history-load/test-run/")
+    assert fake.copied_keys == [
+        (
+            "_staging/history-load/test-run/data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet",
+            "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet",
+        )
+    ]
+
+
+def test_upload_verified_history_skips_partitions_already_in_sync(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    history_path = tmp_path / "history.parquet"
+    audit_path = tmp_path / "audit.json"
+    _history_frame().write_parquet(history_path)
+    audit_path.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    raw_manifest_path = tmp_path / "raw_fetch_NSE.parquet"
+    partition_manifest_path = tmp_path / "partition_manifest.parquet"
+    _write_raw_manifest(raw_manifest_path, history_path)
+    _write_partition_manifest(partition_manifest_path, history_path)
+    client.upload_file(history_path, "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet")
+
+    results = upload_verified_history(
+        client,
+        path=history_path,
+        audit_path=audit_path,
+        exchanges=["NSE"],
+        run_id="test-run",
+        raw_manifest_path=raw_manifest_path,
+        partition_manifest_path=partition_manifest_path,
+    )
+
+    fake = client._client  # type: ignore[attr-defined]
+    assert results == []
+    assert fake.uploaded_keys == ["data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet"]
+    assert fake.copied_keys == []
+    manifest = json.loads(fake.objects["data/daily_stock_data/_manifest.json"].decode("utf-8"))
+    assert manifest["upload_status"] == "noop"
+    assert manifest["partitions"] == []
 
 
 def test_upload_verified_history_accepts_partition_directory(monkeypatch, tmp_path) -> None:
@@ -286,6 +343,7 @@ def test_r2_sync_check_reports_ok_and_mismatches(monkeypatch, tmp_path) -> None:
 
     assert ok.status == "ok"
     assert ok.rows[0]["status"] == "OK"
+    assert client._client.download_calls == 0  # type: ignore[attr-defined]
 
     client.upload_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=02/part.parquet", b"not parquet")
     stale_path = tmp_path / "stale.parquet"
@@ -298,3 +356,87 @@ def test_r2_sync_check_reports_ok_and_mismatches(monkeypatch, tmp_path) -> None:
     statuses = {row["status"] for row in mismatch.rows}
     assert "STALE" in statuses
     assert "EXTRA" in statuses
+    assert client._client.download_calls == 0  # type: ignore[attr-defined]
+
+
+def test_r2_sync_check_reports_missing_when_canonical_object_absent(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    partition_path = tmp_path / "part.parquet"
+    manifest_path = tmp_path / "partition_manifest.parquet"
+    _history_frame().write_parquet(partition_path)
+    _write_partition_manifest(manifest_path, partition_path)
+
+    result = check_r2_sync(client, exchange="NSE", partition_manifest_path=manifest_path)
+
+    assert result.status == "fail"
+    assert result.rows[0]["status"] == "MISSING"
+    assert client._client.download_calls == 0  # type: ignore[attr-defined]
+
+
+def test_r2_sync_check_reports_size_mismatch_as_stale(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    partition_path = tmp_path / "part.parquet"
+    manifest_path = tmp_path / "partition_manifest.parquet"
+    _history_frame().write_parquet(partition_path)
+    _write_partition_manifest(manifest_path, partition_path)
+    client.upload_bytes(
+        "data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet",
+        partition_path.read_bytes() + b"x",
+    )
+
+    result = check_r2_sync(client, exchange="NSE", partition_manifest_path=manifest_path)
+
+    assert result.status == "fail"
+    assert result.rows[0]["status"] == "STALE"
+    assert result.rows[0]["local_file_size"] != result.rows[0]["r2_file_size"]
+    assert client._client.download_calls == 0  # type: ignore[attr-defined]
+
+
+def test_r2_sync_check_matches_multipart_etag_without_remote_download(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    partition_path = tmp_path / "multipart.parquet"
+    manifest_path = tmp_path / "partition_manifest.parquet"
+    payload = b"a" * (DEFAULT_UPLOAD_PART_SIZE + 1)
+    partition_path.write_bytes(payload)
+    pl.DataFrame(
+        [
+            {
+                "exchange": "NSE",
+                "year": 2026,
+                "month": 1,
+                "partition_path": partition_path.as_posix(),
+                "file_size_bytes": partition_path.stat().st_size,
+                "md5": file_md5(partition_path),
+            }
+        ]
+    ).write_parquet(manifest_path)
+    client.upload_bytes("data/daily_stock_data/exchange=NSE/year=2026/month=01/part.parquet", payload)
+
+    result = check_r2_sync(client, exchange="NSE", partition_manifest_path=manifest_path)
+
+    assert result.status == "ok"
+    assert result.rows[0]["status"] == "OK"
+    assert result.rows[0]["local_etag"].endswith('-2"')
+    assert client._client.download_calls == 0  # type: ignore[attr-defined]
+
+
+def test_r2_sync_check_fails_for_legacy_manifest_without_md5(monkeypatch, tmp_path) -> None:
+    client = _fake_client(monkeypatch)
+    partition_path = tmp_path / "part.parquet"
+    manifest_path = tmp_path / "partition_manifest.parquet"
+    _history_frame().write_parquet(partition_path)
+    pl.DataFrame(
+        [
+            {
+                "exchange": "NSE",
+                "year": 2026,
+                "month": 1,
+                "partition_path": partition_path.as_posix(),
+                "file_size_bytes": partition_path.stat().st_size,
+                "row_count": 1,
+            }
+        ]
+    ).write_parquet(manifest_path)
+
+    with pytest.raises(ValueError, match="history-partition-manifest-refresh"):
+        check_r2_sync(client, exchange="NSE", partition_manifest_path=manifest_path)

@@ -34,6 +34,9 @@ class _FakeS3Client:
 
         return {"Body": BytesIO(self.objects[Key])}
 
+    def head_object(self, Bucket, Key):
+        return {"ContentLength": len(self.objects[Key]), "ETag": "etag", "LastModified": None}
+
     def upload_file(self, Filename, Bucket, Key):
         self.objects[Key] = Path(Filename).read_bytes()
 

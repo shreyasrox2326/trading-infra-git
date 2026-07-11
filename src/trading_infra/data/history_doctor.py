@@ -146,6 +146,13 @@ def run_history_doctor(
         "history_path": history_root.as_posix(),
         "expected_trading_weekdays": expected_weekdays,
         "raw_downloaded": int(status_counts.get("downloaded", 0)),
+        "raw_skipped_existing": int(status_counts.get("skipped_existing", 0)),
+        "raw_validated": int(status_counts.get("validated", 0)),
+        "raw_usable": int(
+            status_counts.get("downloaded", 0)
+            + status_counts.get("skipped_existing", 0)
+            + status_counts.get("validated", 0)
+        ),
         "raw_missing": raw_missing,
         "raw_rate_limited": int(status_counts.get("rate_limited", 0)),
         "raw_unparseable": int(status_counts.get("parse_failed", 0) + status_counts.get("corrupt_html", 0)),
@@ -175,6 +182,9 @@ def _history_doctor_markdown(report: dict[str, Any]) -> str:
         f"- status: {report['status']}",
         f"- expected_trading_weekdays: {report['expected_trading_weekdays']}",
         f"- raw_downloaded: {report['raw_downloaded']}",
+        f"- raw_skipped_existing: {report['raw_skipped_existing']}",
+        f"- raw_validated: {report['raw_validated']}",
+        f"- raw_usable: {report['raw_usable']}",
         f"- raw_missing: {report['raw_missing']}",
         f"- raw_rate_limited: {report['raw_rate_limited']}",
         f"- raw_unparseable: {report['raw_unparseable']}",

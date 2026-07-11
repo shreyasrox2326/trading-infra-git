@@ -6,11 +6,16 @@ import polars as pl
 
 from trading_infra.cli import main
 from trading_infra.data.bhavcopy import BhavcopyFetchResult
-from trading_infra.data.fetch_manifest import write_raw_fetch_manifest
+from trading_infra.data.fetch_manifest import (
+    combine_raw_fetch_manifests,
+    mark_raw_fetch_manifest_row,
+    write_raw_fetch_manifest,
+)
 from trading_infra.data.history import (
     build_history_parquet,
     build_history_partitions,
     HistoryBuildResult,
+    refresh_partition_manifest,
     verify_history_frame,
     verify_history_partitions,
     write_history_audit,
@@ -84,10 +89,10 @@ def test_build_history_parquet_combines_exchange_subdirectories(tmp_path) -> Non
         "max_date",
         "symbols",
         "file_size_bytes",
-        "sha256",
+        "md5",
         "source_raw_count",
         "source_raw_files",
-        "source_sha256s",
+        "source_md5s",
         "format_ids",
         "parser_versions",
         "created_at",
@@ -97,7 +102,7 @@ def test_build_history_parquet_combines_exchange_subdirectories(tmp_path) -> Non
     assert frame.columns == list(DAILY_STOCK_DATA_COLUMNS)
     assert frame.get_column("exchange").to_list() == ["BSE", "NSE"]
     assert manifest.get_column("source_raw_files").str.contains("cm02JAN2026bhav").any()
-    assert manifest.get_column("source_sha256s").str.contains(r"[0-9a-f]{64}").any()
+    assert manifest.get_column("source_md5s").str.contains(r"[0-9a-f]{32}").any()
 
 
 def test_build_history_parquet_skips_html_non_bhavcopy_files(tmp_path) -> None:
@@ -241,9 +246,51 @@ def test_history_build_repair_partition_updates_only_selected_partition(tmp_path
     )
 
     feb_frame = pl.read_parquet(output / "exchange=NSE" / "year=2026" / "month=02" / "part.parquet")
-    assert result.partitions == 1
+    assert result.partitions == 2
     assert jan_part.read_bytes() == jan_before
     assert feb_frame.get_column("close").to_list() == [101.5]
+
+
+def test_history_build_incremental_refreshes_full_partition_manifest(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    (raw / "NSE").mkdir(parents=True)
+    (raw / "BSE").mkdir(parents=True)
+    _write_zip(raw / "NSE" / "cm02JAN2026bhav.csv.zip", [_nse_row()])
+    _write_zip(raw / "BSE" / "EQ020126_CSV.ZIP", [_bse_row()])
+    output = tmp_path / "daily_stock_data_full"
+    build_history_partitions(input_path=raw, output_path=output, clean=True)
+
+    _write_zip(raw / "NSE" / "cm03FEB2026bhav.csv.zip", [{**_nse_row(), "TIMESTAMP": "03-FEB-2026"}])
+    result = build_history_partitions(
+        input_path=raw,
+        output_path=output,
+        exchanges=["NSE"],
+        clean=False,
+        incremental=True,
+    )
+
+    manifest = pl.read_parquet(result.manifest_path)
+    assert set(manifest.get_column("exchange").to_list()) == {"NSE", "BSE"}
+    assert manifest.height == 3
+
+
+def test_history_build_clean_scopes_to_selected_exchange(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    (raw / "NSE").mkdir(parents=True)
+    (raw / "BSE").mkdir(parents=True)
+    _write_zip(raw / "NSE" / "cm02JAN2026bhav.csv.zip", [_nse_row()])
+    _write_zip(raw / "BSE" / "EQ020126_CSV.ZIP", [_bse_row()])
+    output = tmp_path / "daily_stock_data_full"
+    build_history_partitions(input_path=raw, output_path=output, clean=True)
+    bse_part = output / "exchange=BSE" / "year=2026" / "month=01" / "part.parquet"
+    before = bse_part.read_bytes()
+
+    _write_zip(raw / "NSE" / "cm03FEB2026bhav.csv.zip", [{**_nse_row(), "TIMESTAMP": "03-FEB-2026"}])
+    build_history_partitions(input_path=raw, output_path=output, exchanges=["NSE"], clean=True)
+
+    assert bse_part.read_bytes() == before
+    manifest = pl.read_parquet(tmp_path / "manifests" / "partition_manifest.parquet")
+    assert set(manifest.get_column("exchange").to_list()) == {"NSE", "BSE"}
 
 
 def test_history_build_from_manifest_uses_listed_raw_files(tmp_path) -> None:
@@ -304,6 +351,47 @@ def test_raw_fetch_manifest_handles_skipped_rows_before_network_rows(tmp_path) -
     assert manifest.get_column("last_attempt_at").null_count() == 1
 
 
+def test_mark_raw_fetch_manifest_row_updates_status_and_reason(tmp_path) -> None:
+    raw_manifest = tmp_path / "raw_fetch_NSE.parquet"
+    source = tmp_path / "cm02JAN2026bhav.csv.zip"
+    source.write_bytes(b"demo")
+    write_raw_fetch_manifest(
+        [BhavcopyFetchResult(date(2026, 1, 2), "rate_limited", source, "HTTP Error 403")],
+        exchange="NSE",
+        path=raw_manifest,
+    )
+
+    mark_raw_fetch_manifest_row(
+        raw_manifest,
+        target_date=date(2026, 1, 2),
+        status="not_available",
+        reason="known archive gap",
+        exchange="NSE",
+    )
+
+    manifest = pl.read_parquet(raw_manifest)
+    assert manifest.get_column("status").to_list() == ["not_available"]
+    assert manifest.get_column("last_error").to_list() == ["known archive gap"]
+
+
+def test_combine_raw_fetch_manifests_merges_exchanges(tmp_path) -> None:
+    nse_manifest = tmp_path / "raw_fetch_NSE.parquet"
+    bse_manifest = tmp_path / "raw_fetch_BSE.parquet"
+    output = tmp_path / "raw_fetch_ALL.parquet"
+    nse_file = tmp_path / "cm02JAN2026bhav.csv.zip"
+    bse_file = tmp_path / "EQ020126_CSV.ZIP"
+    nse_file.write_bytes(b"nse")
+    bse_file.write_bytes(b"bse")
+    write_raw_fetch_manifest([BhavcopyFetchResult(date(2026, 1, 2), "downloaded", nse_file)], exchange="NSE", path=nse_manifest)
+    write_raw_fetch_manifest([BhavcopyFetchResult(date(2026, 1, 2), "downloaded", bse_file)], exchange="BSE", path=bse_manifest)
+
+    combine_raw_fetch_manifests([nse_manifest, bse_manifest], output_path=output)
+
+    manifest = pl.read_parquet(output)
+    assert manifest.height == 2
+    assert set(manifest.get_column("exchange").to_list()) == {"NSE", "BSE"}
+
+
 def test_history_doctor_reports_local_health(tmp_path) -> None:
     raw = tmp_path / "raw"
     raw.mkdir()
@@ -327,6 +415,7 @@ def test_history_doctor_reports_local_health(tmp_path) -> None:
 
     assert result.report["status"] == "ok"
     assert result.report["raw_downloaded"] == 1
+    assert result.report["raw_usable"] == 1
     assert result.report["parquet_partitions_present"] == 1
     assert result.json_path.exists()
     assert result.markdown_path.exists()
@@ -410,12 +499,33 @@ def test_write_history_audit_writes_json_and_markdown(tmp_path) -> None:
     assert audit["passed"] is True
     assert audit["verification_mode"] == "partition-wise"
     assert audit["partitions"] == 1
-    assert audit["partition_summaries"][0]["sha256"]
+    assert audit["partition_summaries"][0]["md5"]
     assert audit["partition_summaries"][0]["schema_columns"] == list(DAILY_STOCK_DATA_COLUMNS)
     assert audit["partition_summaries"][0]["date_min"] == date(2026, 1, 2)
     assert audit["partition_summaries"][0]["symbols"] == 1
     assert report.exists()
     assert report.with_suffix(".md").exists()
+
+
+def test_refresh_partition_manifest_rebuilds_from_existing_files(tmp_path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [_nse_row()])
+    output, _ = build_history_parquet(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full.parquet",
+        exchanges=["NSE"],
+    )
+    manifest_path = tmp_path / "manifests" / "partition_manifest.parquet"
+    manifest_path.unlink()
+
+    rebuilt = refresh_partition_manifest(history_path=output)
+
+    manifest = pl.read_parquet(rebuilt)
+    assert rebuilt == manifest_path
+    assert manifest.height == 1
+    assert manifest.get_column("row_count").to_list() == [1]
+    assert manifest.get_column("md5").null_count() == 0
 
 
 def test_verify_history_partitions_aggregates_partition_summaries(tmp_path) -> None:
@@ -439,7 +549,7 @@ def test_verify_history_partitions_aggregates_partition_summaries(tmp_path) -> N
     assert audit["rows"] == 2
     assert audit["partitions"] == 2
     assert [row["month"] for row in audit["by_month"]] == [1, 2]
-    assert all(row["sha256"] for row in audit["partition_summaries"])
+    assert all(row["md5"] for row in audit["partition_summaries"])
 
 
 def test_write_history_audit_enforces_memory_cap(tmp_path) -> None:
@@ -603,6 +713,7 @@ def test_history_doctor_cli_writes_reports(tmp_path, capsys) -> None:
     captured = capsys.readouterr().out
     assert exit_code == 0
     assert "history-doctor exchange=NSE status=ok" in captured
+    assert "raw_usable=1" in captured
     assert (tmp_path / "audit" / "history_doctor_NSE.json").exists()
 
 
@@ -679,6 +790,46 @@ def test_history_bootstrap_stops_before_build_on_rate_limit(monkeypatch, tmp_pat
     assert [step["step"] for step in result.steps] == ["fetch"]
 
 
+def test_history_bootstrap_allows_explicit_fetch_status_override(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "trading_infra.bootstrap.fetch_bhavcopy_archives",
+        lambda **_kwargs: [BhavcopyFetchResult(date(2026, 1, 2), "rate_limited", None)],
+    )
+    monkeypatch.setattr("trading_infra.bootstrap.write_raw_fetch_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "trading_infra.bootstrap.build_history_partitions",
+        lambda **_kwargs: HistoryBuildResult(
+            output_path=tmp_path / "history",
+            log_path=tmp_path / "build.log",
+            rows=1,
+            partitions=1,
+            skipped_non_bhavcopy=0,
+            exchanges=["NSE"],
+            manifest_path=tmp_path / "partition_manifest.parquet",
+        ),
+    )
+    monkeypatch.setattr("trading_infra.bootstrap.write_history_audit", lambda **_kwargs: {"passed": True, "rows": 1})
+
+    class _Doctor:
+        json_path = tmp_path / "doctor.json"
+        report = {"status": "ok"}
+
+    monkeypatch.setattr("trading_infra.bootstrap.run_history_doctor", lambda **_kwargs: _Doctor())
+
+    result = run_history_bootstrap(
+        exchange="NSE",
+        start_date=date(2026, 1, 2),
+        end_date=date(2026, 1, 2),
+        raw_output_path=tmp_path / "raw",
+        history_path=tmp_path / "history",
+        audit_path=tmp_path / "audit.json",
+        allow_fetch_statuses=("rate_limited",),
+    )
+
+    assert result.status == "ok"
+    assert result.steps[0]["allowed_statuses"] == ["rate_limited"]
+
+
 def test_history_fetch_cli_only_repairs_selected_manifest_statuses(monkeypatch, tmp_path, capsys) -> None:
     class _Response:
         def __enter__(self):
@@ -738,6 +889,73 @@ def test_history_fetch_cli_only_repairs_selected_manifest_statuses(monkeypatch, 
     assert len(requested_urls) == 1
     assert manifest.get_column("status").to_list() == ["downloaded", "downloaded"]
     assert manifest.get_column("bytes").to_list() == [3, 7]
+
+
+def test_history_manifest_cli_commands(tmp_path, capsys) -> None:
+    manifest_a = tmp_path / "raw_fetch_NSE.parquet"
+    manifest_b = tmp_path / "raw_fetch_BSE.parquet"
+    combined = tmp_path / "raw_fetch_ALL.parquet"
+    nse_file = tmp_path / "cm02JAN2026bhav.csv.zip"
+    bse_file = tmp_path / "EQ020126_CSV.ZIP"
+    nse_file.write_bytes(b"nse")
+    bse_file.write_bytes(b"bse")
+    write_raw_fetch_manifest([BhavcopyFetchResult(date(2026, 1, 2), "rate_limited", nse_file, "HTTP Error 403")], exchange="NSE", path=manifest_a)
+    write_raw_fetch_manifest([BhavcopyFetchResult(date(2026, 1, 2), "downloaded", bse_file)], exchange="BSE", path=manifest_b)
+
+    assert main(
+        [
+            "history-manifest-mark",
+            "--manifest-path",
+            str(manifest_a),
+            "--exchange",
+            "NSE",
+            "--date",
+            "2026-01-02",
+            "--status",
+            "not_available",
+            "--reason",
+            "known archive gap",
+        ]
+    ) == 0
+    assert main(
+        [
+            "history-manifest-combine",
+            "--output",
+            str(combined),
+            str(manifest_a),
+            str(manifest_b),
+        ]
+    ) == 0
+
+    captured = capsys.readouterr().out
+    manifest = pl.read_parquet(combined)
+    assert "history-manifest-mark" in captured
+    assert "history-manifest-combine" in captured
+    assert set(manifest.get_column("exchange").to_list()) == {"NSE", "BSE"}
+
+
+def test_history_partition_manifest_refresh_cli(tmp_path, capsys) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    _write_zip(raw / "cm02JAN2026bhav.csv.zip", [_nse_row()])
+    output, _ = build_history_parquet(
+        input_path=raw,
+        output_path=tmp_path / "daily_stock_data_full.parquet",
+        exchanges=["NSE"],
+    )
+    (tmp_path / "manifests" / "partition_manifest.parquet").unlink()
+
+    code = main(
+        [
+            "history-partition-manifest-refresh",
+            "--history-path",
+            str(output),
+        ]
+    )
+
+    captured = capsys.readouterr().out
+    assert code == 0
+    assert "history-partition-manifest-refresh" in captured
 
 
 def test_history_fetch_cli_fails_fast_on_rate_limit_ratio(monkeypatch, tmp_path, capsys) -> None:

@@ -47,6 +47,7 @@ def run_history_bootstrap(
     request_sleep_seconds: float = 0.5,
     retry_sleep_seconds: float = 1.0,
     max_memory_gb: float | None = None,
+    allow_fetch_statuses: tuple[str, ...] = (),
     client: R2Client | None = None,
 ) -> HistoryBootstrapResult:
     """Run the local historical bootstrap workflow for one exchange."""
@@ -72,9 +73,20 @@ def run_history_bootstrap(
     fetch_counts: dict[str, int] = {}
     for result in fetch_results:
         fetch_counts[result.status] = fetch_counts.get(result.status, 0) + 1
-    steps.append({"step": "fetch", "counts": fetch_counts})
+    steps.append(
+        {
+            "step": "fetch",
+            "counts": fetch_counts,
+            "allowed_statuses": sorted(set(allow_fetch_statuses)),
+        }
+    )
 
-    if fetch_counts.get("failed", 0) or fetch_counts.get("rate_limited", 0):
+    blocking_statuses = {
+        status
+        for status, count in fetch_counts.items()
+        if count and status in {"failed", "rate_limited"}
+    } - set(allow_fetch_statuses)
+    if blocking_statuses:
         return HistoryBootstrapResult(
             exchange=normalized_exchange,
             status="fail",

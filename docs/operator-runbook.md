@@ -1,50 +1,72 @@
 # Operator Runbook
 
-This runbook covers local historical data assembly, verified R2 publishing, strategy publishing, and GitHub Actions daily operation.
+This runbook is the operator path for:
 
-Long-running commands emit human-readable progress, a flushed log file where applicable, a machine-readable `summary_json=...` line, and a final `status=ok|warn|fail` line.
+- local full-history bootstrap
+- local verification
+- one-time historical upload to R2
+- daily GitHub Actions paper runs
 
-## 1. Cloudflare R2 Setup
+Use it as a flowchart, not a command dump.
 
-Create a private R2 bucket for the project.
+## 1. What Lives Where
 
-Create access credentials with read/write access to that bucket.
+Durable system roles:
 
-Record these values:
+- R2: source of truth for canonical market data, strategies, registries, and decision logs
+- GitHub Actions: daily market refresh plus paper-decision generation/upload
+- Local machine: raw fetches, full rebuilds, verification, backtests, research, and approved uploads
+
+Normal historical shape:
+
+```text
+fetch raw per exchange
+-> review manifest exceptions
+-> combine manifests
+-> build one combined NSE+BSE history tree
+-> verify
+-> doctor
+-> upload
+```
+
+## 2. Before You Start
+
+R2 env vars:
 
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_S3_API`
 - `R2_BUCKET_NAME`
 
-Canonical market data on R2 lives under:
+If you are in container `/bin/sh`, load env with:
 
-```text
-data/daily_stock_data/exchange=NSE/year=YYYY/month=MM/part.parquet
-data/daily_stock_data/exchange=BSE/year=YYYY/month=MM/part.parquet
+```bash
+. ./.env
 ```
 
-Do not upload raw bhavcopy files as canonical R2 market data.
+Do not assume `source .env` works unless you are explicitly in Bash.
 
-Check object inventory usage and budget thresholds:
+Check current R2 usage first:
 
 ```bash
 python -m trading_infra r2-usage
 python -m trading_infra r2-budget-check
 ```
 
-Both commands write timestamped snapshots under `data/import/audit/r2_usage/`. `r2-budget-check` reports `status=ok|warn|fail` using the project warning/failure thresholds for storage and operation counts. Current operation counts are nullable unless Cloudflare analytics integration is configured later.
+## 3. Full Historical Bootstrap
 
-## 2. Local Full-History Bootstrap
+This section is for rebuilding or extending the local full-history tree.
 
-Fetch raw bhavcopy files into ignored local operator state. Run long downloads inside `tmux` and keep the per-date status log under `data/import/` or `data/raw/`.
+### 3.1 Fetch Raw Files
 
-Verified parseable local raw bhavcopy coverage currently starts at:
+Run long fetches in `tmux`.
 
-- NSE: 1994-11-03 (`data/raw/bhavcopy/NSE/cm03NOV1994bhav.csv.zip`)
-- BSE: 2007-01-02 (`data/raw/bhavcopy/BSE/EQ020107_CSV.ZIP`)
+Verified parseable starts:
 
-There is a local BSE raw file dated 2007-01-01, but it is an HTML/non-bhavcopy payload, so it is not counted as data coverage. Use earlier start dates only when intentionally probing archive gaps; otherwise use the verified parseable starts above for normal full-history bootstrap runs.
+- NSE: `1994-11-03`
+- BSE: `2007-01-02`
+
+Fetch NSE:
 
 ```bash
 tmux new -s history-fetch
@@ -59,7 +81,11 @@ python -m trading_infra history-fetch \
   --retry-sleep-seconds 1 \
   --request-sleep-seconds 0.5 \
   --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
+```
 
+Fetch BSE:
+
+```bash
 python -m trading_infra history-fetch \
   --exchange BSE \
   --start-date 2007-01-02 \
@@ -72,26 +98,25 @@ python -m trading_infra history-fetch \
   --log-path /workspaces/code/trading-infra-git/data/import/history-fetch-bse.log
 ```
 
-`history-fetch` is resumable by default: existing files are skipped unless `--overwrite` is passed. It uses a progress bar by default; use `--no-progress` only for non-interactive logging. The fetch log is appended and flushed as each date completes, so it can be monitored while the command is running:
+Monitor a long fetch:
 
 ```bash
 tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-fetch-nse.log
 ```
 
-`history-fetch` also writes a raw fetch manifest parquet. By default it uses:
+Default manifest outputs:
 
 ```text
-data/import/manifests/raw_fetch_<EXCHANGE>.parquet
+data/import/manifests/raw_fetch_NSE.parquet
+data/import/manifests/raw_fetch_BSE.parquet
 ```
 
-Override it with `--manifest-path`. The manifest records one row per expected weekday with the expected format id, expected filename, primary URL, local path, status, bytes, SHA256, last error, and parser hint.
-
-Repair only selected manifest statuses with `--only`:
+If you are resuming only problem rows:
 
 ```bash
 python -m trading_infra history-fetch \
   --exchange NSE \
-  --start-date 1994-01-01 \
+  --start-date 1994-11-03 \
   --end-date YYYY-MM-DD \
   --output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
   --manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
@@ -99,9 +124,89 @@ python -m trading_infra history-fetch \
   --fail-fast-rate-limit-ratio 0.2
 ```
 
-`--fail-fast-rate-limit-ratio` aborts once observed `rate_limited` rows exceed the configured ratio and still writes the partial manifest rows collected before aborting.
+When to stop:
 
-For a single-command local bootstrap, keep upload disabled until the local reports pass:
+- If NSE is returning mostly `rate_limited`, stop and retry later with conservative settings.
+- Do not treat a large wall of `rate_limited` rows as success.
+
+### 3.2 Review Manifest Exceptions
+
+Do not hand-edit data with one-off scripts if the issue is really a fetch-status decision.
+
+Use manifest review for accepted exceptions such as known archive gaps:
+
+```bash
+python -m trading_infra history-manifest-mark \
+  --manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  --exchange NSE \
+  --date 1995-09-06 \
+  --status not_available \
+  --reason "known archive gap after operator review"
+```
+
+This is the preferred path when you want the decision to be auditable and reusable later.
+
+### 3.3 Combine Reviewed Manifests
+
+Historical upload expects a reviewed combined manifest for the combined history tree.
+
+```bash
+python -m trading_infra history-manifest-combine \
+  --output /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_ALL.parquet \
+  /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_BSE.parquet
+```
+
+Next step:
+
+- build one combined NSE+BSE history tree
+
+### 3.4 Build Combined Local History
+
+Normal build:
+
+```bash
+python -m trading_infra history-build \
+  --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
+  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
+  --workers 4 \
+  --clean \
+  --log-path /workspaces/code/trading-infra-git/data/import/history-build.log
+```
+
+Output shape:
+
+```text
+data/import/daily_stock_data_full/
+  exchange=NSE/year=YYYY/month=MM/part.parquet
+  exchange=BSE/year=YYYY/month=MM/part.parquet
+```
+
+Monitor a long build:
+
+```bash
+tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-build.log
+```
+
+Important build behavior:
+
+- The normal upload shape is a combined NSE+BSE tree.
+- `history-build --clean --exchange X` is exchange-scoped. It should clean only that exchange subtree, not the whole combined tree.
+- `--incremental`, `--only-missing`, and `--repair-partition` are for updating an existing tree without full deletion.
+- `--from-manifest` builds only from rows whose status is `downloaded`, `skipped_existing`, or `validated`.
+
+If the data files are fine but `partition_manifest.parquet` needs regeneration:
+
+```bash
+python -m trading_infra history-partition-manifest-refresh \
+  --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full
+```
+
+### 3.5 Optional Single-Command Bootstrap
+
+`history-bootstrap` is useful when you want one command for fetch -> build -> verify -> doctor, but keep upload off until you are satisfied with the local results.
+
+Strict mode:
 
 ```bash
 python -m trading_infra history-bootstrap \
@@ -115,85 +220,38 @@ python -m trading_infra history-bootstrap \
   --upload false
 ```
 
-Use `--upload true` only after the local audit and doctor reports are acceptable.
-
-For NSE, `rate_limited` means the official archive returned HTTP 403. Stop the run, wait before retrying, and resume with low concurrency; do not continue a full-range run that is logging only `rate_limited` rows. NSE-facing bulk fetches should stay conservative: one worker plus roughly one second between requests.
-
-Build one canonical parquet locally:
+Override mode for a one-off reviewed continuation:
 
 ```bash
-python -m trading_infra history-build \
-  --input-path /workspaces/code/trading-infra-git/data/raw/bhavcopy \
-  --output-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
-  --workers 4 \
-  --clean \
-  --log-path /workspaces/code/trading-infra-git/data/import/history-build.log
-```
-
-`history-build` writes monthly local partitions shaped like R2:
-
-```text
-data/import/daily_stock_data_full/
-  exchange=NSE/year=YYYY/month=MM/part.parquet
-  exchange=BSE/year=YYYY/month=MM/part.parquet
-```
-
-It shows progress by default and writes timestamped phase logs. Monitor a long run with:
-
-```bash
-tail -n 40 -f /workspaces/code/trading-infra-git/data/import/history-build.log
-```
-
-`history-build` writes `data/import/manifests/partition_manifest.parquet`. Use `--clean` for an explicit destructive rebuild. Use `--incremental`, `--only-missing`, or `--repair-partition EXCHANGE YEAR MONTH` to update existing output without deleting unrelated partitions. Use `--from-manifest data/import/manifests/raw_fetch_<EXCHANGE>.parquet` to build only from raw files whose fetch-manifest status is `downloaded`, `skipped_existing`, or `validated`.
-
-Current ingestion uses identity adjustment:
-
-```text
-adj_open=open
-adj_high=high
-adj_low=low
-adj_close=close
-adj_factor=1.0
-```
-
-Delivery fields may be null when the source bhavcopy does not include them.
-
-Older NSE legacy bhavcopies do not include `ISIN`. For those rows, canonical `isin` is populated with the source `SYMBOL` so the full history keeps a non-null security identifier.
-
-Inspect the expected source format for a date before debugging fetch or parse failures:
-
-```bash
-python -m trading_infra format-inspect \
+python -m trading_infra history-bootstrap \
   --exchange NSE \
-  --date 2024-07-08
+  --start-date 1994-11-03 \
+  --end-date YYYY-MM-DD \
+  --raw-output-path /workspaces/code/trading-infra-git/data/raw/bhavcopy/NSE \
+  --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
+  --audit-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
+  --resume \
+  --allow-fetch-status rate_limited \
+  --upload false
 ```
 
-The format registry lives in `src/trading_infra/data/formats.yaml`. It documents the expected filename, primary/fallback URLs, required columns, optional columns, parser name, and known quirks for NSE/BSE legacy and UDiFF/common bhavcopy periods.
+Guideline:
 
-## 3. Local Verification Before Upload
+- Prefer `history-manifest-mark` for durable reviewed exceptions.
+- Use `--allow-fetch-status ...` only when you intentionally want a one-run override.
 
-Run a local health check when you need one command to summarize raw, parquet, and optional R2 state:
+## 4. Verify Before Upload
 
-```bash
-python -m trading_infra history-doctor \
-  --exchange NSE \
-  --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
-  --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full
-```
+You usually want both `history-verify` and `history-doctor`.
 
-Add `--compare-r2` when R2 credentials are available. Reports are written to `data/import/audit/history_doctor_<EXCHANGE>.json` and `.md`.
+They answer different questions:
 
-Compare the local partition manifest against canonical R2 market-data objects before and after historical upload:
+- `history-verify`: are the local parquet files valid and internally sane?
+- `history-doctor`: does the fetch/build pipeline look complete for the reviewed manifest?
 
-```bash
-python -m trading_infra r2-sync-check \
-  --exchange NSE \
-  --partition-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/partition_manifest.parquet
-```
+So yes, `history-verify` can pass while `history-doctor` still warns or fails.
 
-The sync check reports `OK`, `MISSING`, `STALE`, and `EXTRA` rows using local/R2 row counts, file sizes, and SHA256 hashes where available.
-
-Verify before any R2 historical replacement:
+### 4.1 Verify Parquet Integrity
 
 ```bash
 python -m trading_infra history-verify \
@@ -203,97 +261,163 @@ python -m trading_infra history-verify \
   --max-memory-gb 4
 ```
 
-`history-verify` verifies monthly parquet files partition by partition and writes compact aggregate metadata instead of loading the full history into one frame. Inspect `history_audit.json` and `history_audit.md`. Confirm:
+You want:
 
-- audit passed
-- accepted date ranges by exchange
-- row counts by exchange/year/month look reasonable
-- duplicate key count is zero
-- invalid OHLC count is zero
-- negative volume/turnover counts are zero
-- identity adjustment is acceptable for this load
-- every `partition_summaries` entry has the expected row count, file size, and SHA256
+- `passed=true`
+- zero duplicate keys
+- zero invalid OHLC rows
+- sensible date ranges and partition counts
 
-User approval is required before replacing or extending canonical R2 historical market data.
+### 4.2 Doctor The Pipeline State
 
-## 4. One-Time Verified R2 Historical Upload
+Run per exchange:
 
-Upload only after local verification passes:
+```bash
+python -m trading_infra history-doctor \
+  --exchange NSE \
+  --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full
+```
+
+Optionally compare against R2 too:
+
+```bash
+python -m trading_infra history-doctor \
+  --exchange NSE \
+  --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  --history-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
+  --compare-r2
+```
+
+Useful doctor counters:
+
+- `raw_downloaded`
+- `raw_skipped_existing`
+- `raw_validated`
+- `raw_usable`
+
+If `raw_usable` is high and `raw_downloaded=0`, that can still be healthy on a resume-heavy run.
+
+### 4.3 Compare Local Partition Manifest To R2
+
+```bash
+python -m trading_infra r2-sync-check \
+  --exchange NSE \
+  --partition-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/partition_manifest.parquet
+```
+
+What it does:
+
+- reads the local partition manifest and canonical R2 keys for the selected exchange
+- calls R2 `head_object` on matching canonical `part.parquet` objects
+- compares remote `ETag` and size against local expected values
+- computes multipart-style expected ETags locally when the remote object uses multipart upload form
+
+What it does not do:
+
+- it does not download remote parquet files during the normal sync check
+- it does not recompute remote row counts during the normal sync check
+
+Next step:
+
+- upload only after local verification is acceptable and the operator explicitly wants upload
+
+## 5. Historical Upload To R2
+
+Use the combined history tree and combined reviewed raw manifest:
 
 ```bash
 python -m trading_infra history-upload \
   --path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
   --audit-path /workspaces/code/trading-infra-git/data/import/history_audit.json \
-  --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_NSE.parquet \
+  --raw-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/raw_fetch_ALL.parquet \
   --partition-manifest-path /workspaces/code/trading-infra-git/data/import/manifests/partition_manifest.parquet \
   --exchange NSE \
   --exchange BSE \
   --workers 8
 ```
 
-The upload path streams monthly canonical partition files, uploads them to `_staging/history-load/<run_id>/...`, verifies staged object sizes, then promotes canonical `part.parquet` files under `data/daily_stock_data/`. Staging, verification, and promotion run with bounded parallelism controlled by `--workers` and show progress bars by default. A manifest with run id, created timestamp, exchange coverage, partition rows, source path, audit path, and upload status is written to `data/daily_stock_data/_manifest.json`.
+What it does:
 
-Use `market-data-upload` only for explicit operator-controlled canonical parquet uploads. The full historical bootstrap should use `history-upload`.
+- compares canonical R2 objects first using `head_object` metadata
+- uploads only missing or stale monthly partitions to `_staging/history-load/<run_id>/...`
+- verifies staged object sizes with R2 metadata
+- promotes only the uploaded partitions with server-side copy
+- writes canonical `part.parquet` objects
+- writes `data/daily_stock_data/_manifest.json`
 
-## 5. Daily Market-Data Refresh
+What it does not do:
 
-Refresh one exchange/date into its affected monthly R2 partition:
+- it does not make raw bhavcopy files canonical R2 artifacts
 
-```bash
-python -m trading_infra market-data-refresh \
-  --date YYYY-MM-DD \
-  --exchange NSE
+## 6. Clean Old Staging Objects
 
-python -m trading_infra market-data-refresh \
-  --date YYYY-MM-DD \
-  --exchange BSE
-```
+Staging objects are safe but not canonical.
 
-The refresh command fetches only the requested date, normalizes it to the canonical schema, downloads only the affected R2 month, merges and deduplicates by `date + exchange + isin + series`, stages the monthly parquet, then promotes `part.parquet`.
-
-If the exchange file is unavailable, the command reports `status=no_data` and exits successfully so holidays do not fail the workflow.
-
-## 6. Local Strategy Preparation
-
-Create a versioned local strategy folder under `strategies/<strategy_id>/` only when preparing a new strategy version for first upload to R2.
-
-Minimum files:
-
-- `config.yaml`
-- `metadata.json`
-
-For the current supported strategy type, use the example in `examples/strategies/top_n_adj_close_v1/`.
-
-After the strategy version is uploaded, treat R2 as the canonical source. Local `strategies/`, `registry/`, and `decisions/` directories are workspace/cache state only.
-
-## 7. Local Backtest
-
-Run a backtest locally:
+Historical staging dry run:
 
 ```bash
-python -m trading_infra backtest-run \
-  --base-path /workspaces/code/trading-infra-git \
-  --strategy-id top_n_adj_close_v1 \
-  --market-data-path /path/to/local/market.parquet \
-  --start-date 2026-01-01 \
-  --end-date 2026-01-31
+python -m trading_infra r2-cleanup-staging \
+  --prefix _staging/history-load/ \
+  --older-than-days 7 \
+  --dry-run
 ```
 
-Or run the historical backtest directly against R2-backed market data:
+Daily refresh staging dry run:
 
 ```bash
-python -m trading_infra backtest-run \
-  --base-path /workspaces/code/trading-infra-git \
-  --strategy-id top_n_adj_close_v1 \
-  --use-r2 \
-  --exchange NSE \
-  --start-date 2026-01-01 \
-  --end-date 2026-01-31
+python -m trading_infra r2-cleanup-staging \
+  --prefix _staging/daily-refresh/ \
+  --older-than-days 7 \
+  --dry-run
 ```
 
-R2-backed mode downloads strategy artifacts from R2 and loads all available market history up to `end-date` before emitting decisions only for the requested window.
+Delete only after you are comfortable with the matched keys.
 
-## 8. Publish Strategies And Decisions To R2
+## 7. Daily GitHub Actions Behavior
+
+Workflow file:
+
+- `.github/workflows/daily-paper.yml`
+
+Current intended behavior:
+
+- installs pinned Python dependencies from `requirements.lock`
+- performs `r2-budget-check`
+- refreshes market data for each requested exchange/date
+- runs `paper-dry-run --use-r2`
+- runs `performance-refresh --decision-kind paper`
+- uploads paper results by default on scheduled runs
+
+Important daily-run behavior:
+
+- the workflow fetches raw bhavcopy into temporary runner state only
+- the durable output is canonical cleaned parquet plus paper decisions
+- full-history raw bhavcopies remain local/operator state and are not kept as canonical R2 artifacts
+- rerunning the same date should not create duplicate market-data rows
+- rerunning the same date should not create duplicate paper-decision rows
+- rerunning the same date refreshes paper performance from the stored decision log
+
+If the bhavcopy is unavailable for the requested date, refresh returns `status=no_data` and paper evaluation is skipped for that exchange/date.
+
+## 8. Local Strategy And Decision Operations
+
+Private strategy folder shape:
+
+```text
+strategies/<strategy_id>/
+  config.yaml
+  metadata.json
+  model.pkl
+  feature_config.yaml
+```
+
+For private pickle-backed strategies:
+
+- `strategy_type: private_pickle_v1`
+- `runtime_contract: private_pickle_v1`
+- `lookback_days: <bounded integer>`
+- full cash day means zero decision rows for that date
 
 Upload strategy artifacts:
 
@@ -301,6 +425,46 @@ Upload strategy artifacts:
 python -m trading_infra strategy-upload \
   --base-path /workspaces/code/trading-infra-git \
   --strategy-id top_n_adj_close_v1
+```
+
+Run local backtest:
+
+```bash
+python -m trading_infra backtest-run \
+  --base-path /workspaces/code/trading-infra-git \
+  --strategy-id top_n_adj_close_v1 \
+  --market-data-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full/exchange=NSE \
+  --exchange NSE \
+  --start-date 2026-01-01 \
+  --end-date 2026-01-31
+```
+
+Local backtest behavior:
+
+- local `backtest-run` now loads market data in chunks instead of one giant in-memory frame
+- bounded-lookback strategies use overlapped warmup windows between chunks
+- private pickle-backed strategies reuse one runtime per chunk and precompute feature tables once per chunk
+- progress is shown by default through `tqdm`
+- for full-history local runs, prefer an exchange-scoped path such as `.../daily_stock_data_full/exchange=NSE`
+
+Useful tuning flags:
+
+```bash
+--chunk-size-days 252
+--warmup-days 180
+--no-progress
+```
+
+Example full-history NSE private-strategy run:
+
+```bash
+python -m trading_infra backtest-run \
+  --base-path /workspaces/code/trading-infra-git \
+  --strategy-id v1_regime_sideways_etf_rotation_long \
+  --market-data-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full/exchange=NSE \
+  --exchange NSE \
+  --start-date 1994-11-03 \
+  --end-date 2026-06-25
 ```
 
 Upload backtest decisions:
@@ -311,59 +475,62 @@ python -m trading_infra backtest-upload \
   --path /workspaces/code/trading-infra-git/decisions/backtest/top_n_adj_close_v1/decisions.parquet
 ```
 
-Upload the registry:
+Upload registry:
 
 ```bash
 python -m trading_infra registry-upload \
   --path /workspaces/code/trading-infra-git/registry/strategies.parquet
 ```
 
-Upload commands validate and rewrite local Parquet before publishing.
-
-## 9. GitHub Actions Setup
-
-In GitHub repository settings, add these Actions secrets:
-
-- `R2_ACCESS_KEY_ID`
-- `R2_SECRET_ACCESS_KEY`
-- `R2_S3_API`
-- `R2_BUCKET_NAME`
-
-Then trigger the `Daily Paper Trading` workflow manually using `workflow_dispatch`.
-
-Recommended first run inputs:
-
-- `run_date`: a known completed trading date
-- `exchange`: `NSE BSE`
-- `skip_market_refresh`: `false`
-- `upload_results`: `true`
-
-The scheduled workflow refreshes market data before paper evaluation. If refresh returns `no_data` for an exchange/date, paper evaluation is skipped for that exchange/date.
-
-GitHub Actions is intentionally scoped to daily refresh, cheap R2 budget checks, paper evaluation, and paper-decision upload. Do not use this workflow for full historical download, full historical rebuild, full backup verification, large backtests, parameter sweeps, or model training; keep those local or move them to dedicated compute later.
-
-## 10. Validation Checklist
-
-Run a local R2-backed paper dry-run:
+Compute realized performance locally from existing decisions:
 
 ```bash
-python -m trading_infra paper-dry-run \
-  --date 2026-01-31 \
-  --use-r2 \
-  --exchange NSE
+python -m trading_infra performance-compute \
+  --strategy-id top_n_adj_close_v1 \
+  --decision-kind backtest \
+  --decisions-path /workspaces/code/trading-infra-git/decisions/backtest/top_n_adj_close_v1/decisions.parquet \
+  --market-data-path /workspaces/code/trading-infra-git/data/import/daily_stock_data_full \
+  --output-dir /workspaces/code/trading-infra-git/performance/backtest/top_n_adj_close_v1
 ```
 
-Then verify:
+Refresh realized performance from R2-backed paper decisions:
 
-- strategy artifacts exist under `strategies/<strategy_id>/...`
-- registry exists under `registry/strategies.parquet`
-- backtest decisions exist under `decisions/backtest/<strategy_id>/decisions.parquet`
-- paper decisions are created or updated under `decisions/paper/<strategy_id>/decisions.parquet`
-- R2-backed paper runs append to existing paper history instead of replacing it
-- rerunning the same date does not create duplicate paper rows
+```bash
+python -m trading_infra performance-refresh \
+  --decision-kind paper \
+  --exchange NSE \
+  --upload-results
+```
 
-## 11. Current Limitation
+## 9. Quick “What Do I Run Now?” Guide
 
-The first production-supported strategy type is `top_n_adj_close`.
+If you want to rebuild history from raw:
 
-Optional ML artifacts can be stored and uploaded, but ML strategy execution, feature generation, model loading, and inference contracts are not implemented yet.
+1. `history-fetch` per exchange
+2. `history-manifest-mark` for reviewed exceptions
+3. `history-manifest-combine`
+4. `history-build --clean`
+5. `history-verify`
+6. `history-doctor` per exchange
+7. `r2-sync-check`
+8. `history-upload`
+
+If you only need to repair a few fetch failures:
+
+1. `history-fetch --only missing,rate_limited,failed`
+2. review statuses
+3. rebuild incrementally or repair selected partitions
+4. re-run verify and doctor
+
+If partition files are correct but the manifest looks wrong:
+
+1. `history-partition-manifest-refresh`
+2. re-run `history-doctor` or `r2-sync-check`
+
+If you want to inspect the expected file format for one date:
+
+```bash
+python -m trading_infra format-inspect \
+  --exchange NSE \
+  --date 2024-07-08
+```

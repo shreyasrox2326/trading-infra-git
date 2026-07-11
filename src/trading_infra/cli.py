@@ -10,6 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Sequence
 
+import polars as pl
+
 from trading_infra.data.bhavcopy import (
     BhavcopyRateLimitError,
     fetch_bhavcopy_archives,
@@ -17,24 +19,30 @@ from trading_infra.data.bhavcopy import (
 )
 from trading_infra.bootstrap import run_history_bootstrap
 from trading_infra.data.fetch_manifest import (
+    combine_raw_fetch_manifests,
     default_raw_fetch_manifest_path,
+    mark_raw_fetch_manifest_row,
     select_manifest_dates,
     write_raw_fetch_manifest,
 )
 from trading_infra.data.formats import inspect_bhavcopy_format
 from trading_infra.data.history_doctor import run_history_doctor
-from trading_infra.data.history import build_history_parquet, build_history_partitions
+from trading_infra.data.history import build_history_parquet, build_history_partitions, refresh_partition_manifest
 from trading_infra.data.history import write_history_audit
-from trading_infra.data.market_data import load_daily_stock_data
-from trading_infra.pipelines.backtest import run_backtest
+from trading_infra.data.market_data import load_daily_stock_data, load_trading_dates
+from trading_infra.performance import compute_strategy_performance, upload_performance_result, write_performance_result
+from trading_infra.pipelines.backtest import run_backtest, run_backtest_chunked
 from trading_infra.pipelines.paper import run_daily_paper_job, run_daily_paper_job_from_r2
-from trading_infra.registry import load_strategy_registry
+from trading_infra.registry import active_strategy_ids, load_strategy_registry
 from trading_infra.storage.decisions import read_decisions_parquet
 from trading_infra.storage.decisions import write_decisions_parquet
 from trading_infra.storage.market_data import list_market_data_partitions, upload_market_data_partitions
-from trading_infra.storage.history import upload_verified_history
+from trading_infra.storage.history import cleanup_staging_prefix, upload_verified_history
 from trading_infra.storage.remote import (
+    download_backtest_decisions,
+    download_paper_decisions,
     download_strategy_artifacts,
+    load_strategy_registry_from_r2,
     upload_backtest_decisions,
     upload_strategy_artifacts,
     upload_strategy_registry,
@@ -79,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--start-date", required=True)
     backtest.add_argument("--end-date", required=True)
     backtest.add_argument("--output-path")
+    backtest.add_argument("--chunk-size-days", type=int, default=252)
+    backtest.add_argument("--warmup-days", type=int)
+    backtest.add_argument("--progress", action="store_true", default=True)
+    backtest.add_argument("--no-progress", dest="progress", action="store_false")
 
     strategy_upload = subparsers.add_parser("strategy-upload", help="Upload local strategy artifacts to R2.")
     strategy_upload.add_argument("--base-path", default=".")
@@ -156,6 +168,26 @@ def build_parser() -> argparse.ArgumentParser:
     history_build.add_argument("--progress", action="store_true", default=True)
     history_build.add_argument("--no-progress", dest="progress", action="store_false")
 
+    history_manifest_mark = subparsers.add_parser("history-manifest-mark", help="Mark one raw fetch manifest row after operator review.")
+    history_manifest_mark.add_argument("--manifest-path", required=True)
+    history_manifest_mark.add_argument("--date", required=True)
+    history_manifest_mark.add_argument("--status", required=True)
+    history_manifest_mark.add_argument("--reason", required=True)
+    history_manifest_mark.add_argument("--exchange")
+
+    history_manifest_combine = subparsers.add_parser("history-manifest-combine", help="Combine per-exchange raw fetch manifests.")
+    history_manifest_combine.add_argument("--output", required=True)
+    history_manifest_combine.add_argument("paths", nargs="+")
+
+    history_partition_refresh = subparsers.add_parser(
+        "history-partition-manifest-refresh",
+        help="Regenerate partition_manifest.parquet from existing local partition files.",
+    )
+    history_partition_refresh.add_argument("--history-path", required=True)
+    history_partition_refresh.add_argument("--workers", type=int, default=4)
+    history_partition_refresh.add_argument("--progress", action="store_true", default=True)
+    history_partition_refresh.add_argument("--no-progress", dest="progress", action="store_false")
+
     history_verify = subparsers.add_parser("history-verify", help="Verify canonical full-history market-data parquet.")
     history_verify.add_argument("--path", required=True)
     history_verify.add_argument("--report-path", required=True)
@@ -188,6 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     history_bootstrap.add_argument("--request-sleep-seconds", type=float, default=0.5)
     history_bootstrap.add_argument("--retry-sleep-seconds", type=float, default=1.0)
     history_bootstrap.add_argument("--max-memory-gb", type=float)
+    history_bootstrap.add_argument("--allow-fetch-status")
 
     history_upload = subparsers.add_parser("history-upload", help="Upload verified full-history market data to R2.")
     history_upload.add_argument("--path", required=True)
@@ -199,9 +232,27 @@ def build_parser() -> argparse.ArgumentParser:
     history_upload.add_argument("--progress", action="store_true", default=True)
     history_upload.add_argument("--no-progress", dest="progress", action="store_false")
 
+    performance_compute = subparsers.add_parser("performance-compute", help="Compute realized performance from decisions and market data.")
+    performance_compute.add_argument("--strategy-id", required=True)
+    performance_compute.add_argument("--decision-kind", choices=["backtest", "paper"], required=True)
+    performance_compute.add_argument("--decisions-path")
+    performance_compute.add_argument("--market-data-path")
+    performance_compute.add_argument("--use-r2", action="store_true")
+    performance_compute.add_argument("--exchange")
+    performance_compute.add_argument("--output-dir")
+    performance_compute.add_argument("--upload-results", action="store_true")
+
+    performance_refresh = subparsers.add_parser("performance-refresh", help="Compute daily performance for all active R2-backed strategies.")
+    performance_refresh.add_argument("--decision-kind", choices=["backtest", "paper"], default="paper")
+    performance_refresh.add_argument("--exchange", required=True)
+    performance_refresh.add_argument("--upload-results", action="store_true")
+
     r2_sync_check = subparsers.add_parser("r2-sync-check", help="Compare local partition manifest to R2 market data.")
     r2_sync_check.add_argument("--exchange", required=True)
     r2_sync_check.add_argument("--partition-manifest-path", default="data/import/manifests/partition_manifest.parquet")
+    r2_sync_check.add_argument("--workers", type=int, default=8)
+    r2_sync_check.add_argument("--progress", action="store_true", default=True)
+    r2_sync_check.add_argument("--no-progress", dest="progress", action="store_false")
 
     r2_usage = subparsers.add_parser("r2-usage", help="Report R2 object inventory usage.")
     r2_usage.add_argument("--prefix", default="")
@@ -210,6 +261,11 @@ def build_parser() -> argparse.ArgumentParser:
     r2_budget = subparsers.add_parser("r2-budget-check", help="Check R2 usage against budget thresholds.")
     r2_budget.add_argument("--prefix", default="")
     r2_budget.add_argument("--snapshot-dir")
+
+    r2_cleanup_staging = subparsers.add_parser("r2-cleanup-staging", help="List or delete old staging objects under one prefix.")
+    r2_cleanup_staging.add_argument("--prefix", required=True)
+    r2_cleanup_staging.add_argument("--older-than-days", type=int, required=True)
+    r2_cleanup_staging.add_argument("--dry-run", action="store_true", default=False)
 
     format_inspect = subparsers.add_parser("format-inspect", help="Inspect expected bhavcopy format for a date.")
     format_inspect.add_argument("--exchange", required=True)
@@ -280,20 +336,47 @@ def backtest_run(args: argparse.Namespace) -> int:
                 market_data,
                 start_date=start_date,
                 end_date=end_date,
+                show_progress=args.progress,
             )
         source = f"r2 exchange={args.exchange} strategy_source=r2 market_history=full"
     else:
         if not args.market_data_path:
             raise ValueError("--market-data-path is required unless --use-r2 is set.")
         strategy = build_strategy(load_stored_strategy(args.base_path, args.strategy_id))
-        market_data = load_daily_stock_data(args.market_data_path, as_of_date=end_date)
-        decisions = run_backtest(
-            strategy,
-            market_data,
+        exchanges = [args.exchange] if args.exchange else None
+        scheduled_dates = load_trading_dates(
+            args.market_data_path,
             start_date=start_date,
             end_date=end_date,
+            exchanges=exchanges,
         )
-        source = f"local market_data_path={args.market_data_path} strategy_source=local"
+        if not scheduled_dates:
+            raise ValueError(
+                f"No trading dates found for start_date={start_date.isoformat()} end_date={end_date.isoformat()}."
+            )
+        lookback_days = int(getattr(strategy, "lookback_days", 0) or 0)
+        warmup_days = args.warmup_days if args.warmup_days is not None else max(lookback_days, 120)
+
+        def _load_chunk(chunk_start: date | None, chunk_end: date) -> pl.DataFrame:
+            return load_daily_stock_data(
+                args.market_data_path,
+                start_date=chunk_start,
+                as_of_date=chunk_end,
+                exchanges=exchanges,
+            )
+
+        decisions = run_backtest_chunked(
+            strategy,
+            dates=scheduled_dates,
+            load_market_data=_load_chunk,
+            warmup_days=warmup_days,
+            chunk_size=args.chunk_size_days,
+            show_progress=args.progress,
+        )
+        source = (
+            f"local market_data_path={args.market_data_path} strategy_source=local "
+            f"chunk_size_days={args.chunk_size_days} warmup_days={warmup_days}"
+        )
 
     output_path = Path(args.output_path) if args.output_path else (
         Path(args.base_path) / "decisions" / "backtest" / args.strategy_id / "decisions.parquet"
@@ -540,6 +623,45 @@ def history_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def history_manifest_mark(args: argparse.Namespace) -> int:
+    path = mark_raw_fetch_manifest_row(
+        args.manifest_path,
+        target_date=_parse_date(args.date),
+        status=args.status,
+        reason=args.reason,
+        exchange=args.exchange,
+    )
+    print(
+        f"history-manifest-mark manifest={path.as_posix()} date={args.date} "
+        f"status={args.status} exchange={args.exchange or ''} reason={args.reason}"
+    )
+    return 0
+
+
+def history_manifest_combine(args: argparse.Namespace) -> int:
+    path = combine_raw_fetch_manifests(args.paths, output_path=args.output)
+    manifest = pl.read_parquet(path)
+    print(
+        f"history-manifest-combine output={path.as_posix()} inputs={len(args.paths)} "
+        f"rows={manifest.height} exchanges={sorted(set(manifest.get_column('exchange').to_list()))}"
+    )
+    return 0
+
+
+def history_partition_manifest_refresh(args: argparse.Namespace) -> int:
+    path = refresh_partition_manifest(
+        history_path=args.history_path,
+        show_progress=args.progress,
+        workers=args.workers,
+    )
+    manifest = pl.read_parquet(path)
+    print(
+        f"history-partition-manifest-refresh history_path={args.history_path} workers={args.workers} "
+        f"manifest={path.as_posix()} rows={manifest.height}"
+    )
+    return 0
+
+
 def history_verify(args: argparse.Namespace) -> int:
     audit = write_history_audit(
         path=args.path,
@@ -576,7 +698,8 @@ def history_doctor(args: argparse.Namespace) -> int:
     report = result.report
     print(
         f"history-doctor exchange={report['exchange']} status={report['status']} "
-        f"raw_downloaded={report['raw_downloaded']} raw_missing={report['raw_missing']} "
+        f"raw_downloaded={report['raw_downloaded']} raw_skipped_existing={report['raw_skipped_existing']} "
+        f"raw_usable={report['raw_usable']} raw_missing={report['raw_missing']} "
         f"raw_rate_limited={report['raw_rate_limited']} raw_unparseable={report['raw_unparseable']} "
         f"parquet_partitions_present={report['parquet_partitions_present']} "
         f"parquet_partitions_missing={len(report['parquet_partitions_missing'])} "
@@ -593,6 +716,11 @@ def history_doctor(args: argparse.Namespace) -> int:
 
 
 def history_bootstrap(args: argparse.Namespace) -> int:
+    allow_fetch_statuses = tuple(
+        status.strip()
+        for status in (args.allow_fetch_status or "").split(",")
+        if status.strip()
+    )
     result = run_history_bootstrap(
         exchange=args.exchange,
         start_date=_parse_date(args.start_date),
@@ -609,6 +737,7 @@ def history_bootstrap(args: argparse.Namespace) -> int:
         request_sleep_seconds=args.request_sleep_seconds,
         retry_sleep_seconds=args.retry_sleep_seconds,
         max_memory_gb=args.max_memory_gb,
+        allow_fetch_statuses=allow_fetch_statuses,
     )
     print(
         f"history-bootstrap exchange={result.exchange} status={result.status} "
@@ -660,18 +789,106 @@ def history_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def performance_compute(args: argparse.Namespace) -> int:
+    if args.use_r2:
+        if not args.exchange:
+            raise ValueError("--exchange is required with --use-r2.")
+        client = R2Client.from_env()
+        decisions = (
+            download_backtest_decisions(client, args.strategy_id)
+            if args.decision_kind == "backtest"
+            else download_paper_decisions(client, args.strategy_id)
+        )
+        market_data = load_daily_stock_data_history_from_r2(client, exchange=args.exchange, end_date=decisions.get_column("date").max() if not decisions.is_empty() else date.today())
+    else:
+        if not args.decisions_path:
+            raise ValueError("--decisions-path is required unless --use-r2 is set.")
+        if not args.market_data_path:
+            raise ValueError("--market-data-path is required unless --use-r2 is set.")
+        decisions = read_decisions_parquet(args.decisions_path)
+        market_data = load_daily_stock_data(args.market_data_path)
+    result = compute_strategy_performance(
+        decisions=decisions,
+        market_data=market_data,
+        strategy_id=args.strategy_id,
+        decision_kind=args.decision_kind,
+        primary_exchange=args.exchange,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else Path("performance") / args.decision_kind / args.strategy_id
+    daily_path, summary_path = write_performance_result(
+        result,
+        daily_path=output_dir / "daily.parquet",
+        summary_path=output_dir / "summary.json",
+    )
+    if args.upload_results:
+        if not args.use_r2:
+            client = R2Client.from_env()
+        upload_performance_result(client, result)
+    print(
+        f"performance-compute strategy_id={args.strategy_id} decision_kind={args.decision_kind} "
+        f"realized_dates={result.summary['realized_dates']} final_multiple={result.summary['final_multiple']} "
+        f"daily={daily_path.as_posix()} summary={summary_path.as_posix()} uploaded={str(args.upload_results).lower()}"
+    )
+    return 0
+
+
+def performance_refresh(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    registry = load_strategy_registry_from_r2(client)
+    strategy_ids = active_strategy_ids(registry)
+    computed = 0
+    for strategy_id in strategy_ids:
+        decisions = (
+            download_backtest_decisions(client, strategy_id)
+            if args.decision_kind == "backtest"
+            else download_paper_decisions(client, strategy_id)
+        )
+        if decisions.is_empty():
+            continue
+        market_data = load_daily_stock_data_history_from_r2(
+            client,
+            exchange=args.exchange,
+            end_date=decisions.get_column("date").max(),
+        )
+        result = compute_strategy_performance(
+            decisions=decisions,
+            market_data=market_data,
+            strategy_id=strategy_id,
+            decision_kind=args.decision_kind,
+            primary_exchange=args.exchange,
+        )
+        if args.upload_results:
+            upload_performance_result(client, result)
+        computed += 1
+        print(
+            f"performance-refresh strategy_id={strategy_id} decision_kind={args.decision_kind} "
+            f"realized_dates={result.summary['realized_dates']} final_multiple={result.summary['final_multiple']}"
+        )
+    _emit_summary(
+        "performance-refresh",
+        status="ok",
+        decision_kind=args.decision_kind,
+        exchange=args.exchange,
+        strategies=computed,
+        uploaded=args.upload_results,
+    )
+    return 0
+
+
 def r2_sync_check(args: argparse.Namespace) -> int:
     client = R2Client.from_env()
     result = check_r2_sync(
         client,
         exchange=args.exchange,
         partition_manifest_path=args.partition_manifest_path,
+        show_progress=args.progress,
+        workers=args.workers,
     )
     print(f"r2-sync-check exchange={args.exchange.upper()} status={result.status} rows={len(result.rows)}")
     for row in result.rows:
         print(
             f"{row['status']} {row['exchange']} year={row['year']} month={row['month']} "
-            f"local_rows={row['local_row_count']} r2_rows={row['r2_row_count']} "
+            f"local_etag={row['local_etag']} r2_etag={row['r2_etag']} "
             f"local_size={row['local_file_size']} r2_size={row['r2_file_size']} key={row['r2_key']}"
         )
     return 0 if result.status == "ok" else 1
@@ -702,6 +919,23 @@ def r2_budget_check(args: argparse.Namespace) -> int:
         f"snapshot={snapshot.as_posix()}"
     )
     return 0 if report["status"] != "fail" else 1
+
+
+def r2_cleanup_staging(args: argparse.Namespace) -> int:
+    client = R2Client.from_env()
+    stale_keys = cleanup_staging_prefix(
+        client,
+        prefix=args.prefix,
+        older_than_days=args.older_than_days,
+        dry_run=args.dry_run,
+    )
+    print(
+        f"r2-cleanup-staging prefix={args.prefix} older_than_days={args.older_than_days} "
+        f"dry_run={str(args.dry_run).lower()} matched={len(stale_keys)}"
+    )
+    for key in stale_keys[:50]:
+        print(key)
+    return 0
 
 
 def format_inspect(args: argparse.Namespace) -> int:
@@ -745,6 +979,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_fetch(args)
     if args.command == "history-build":
         return history_build(args)
+    if args.command == "history-manifest-mark":
+        return history_manifest_mark(args)
+    if args.command == "history-manifest-combine":
+        return history_manifest_combine(args)
+    if args.command == "history-partition-manifest-refresh":
+        return history_partition_manifest_refresh(args)
     if args.command == "history-verify":
         return history_verify(args)
     if args.command == "history-doctor":
@@ -753,12 +993,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return history_bootstrap(args)
     if args.command == "history-upload":
         return history_upload(args)
+    if args.command == "performance-compute":
+        return performance_compute(args)
+    if args.command == "performance-refresh":
+        return performance_refresh(args)
     if args.command == "r2-sync-check":
         return r2_sync_check(args)
     if args.command == "r2-usage":
         return r2_usage(args)
     if args.command == "r2-budget-check":
         return r2_budget_check(args)
+    if args.command == "r2-cleanup-staging":
+        return r2_cleanup_staging(args)
     if args.command == "format-inspect":
         return format_inspect(args)
     parser.error(f"Unsupported command: {args.command}")

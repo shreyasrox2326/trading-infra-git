@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
+from trading_infra.strategies.private_pickle import PrivatePickleStrategy
 from trading_infra.strategies.top_n import TopNByAdjustedCloseStrategy
 from trading_infra.strategy import Strategy
 from trading_infra.strategy_store import StoredStrategy
@@ -35,6 +36,27 @@ def build_strategy(stored_strategy: StoredStrategy) -> Strategy:
                     if stored_strategy.config.get("lookback_days") is not None
                     else 0
                 ),
+            ),
+        )
+
+    if declared_type == "private_pickle_v1":
+        if stored_strategy.model_path is None:
+            raise FileNotFoundError(f"Strategy {stored_strategy.strategy_id} is missing required private artifact: model.pkl")
+        runtime_contract = stored_strategy.config.get("runtime_contract", "private_pickle_v1")
+        if runtime_contract != "private_pickle_v1":
+            raise ValueError(
+                f"Strategy {stored_strategy.strategy_id} declares unsupported runtime_contract: {runtime_contract}"
+            )
+        lookback_days = stored_strategy.config.get("lookback_days")
+        if lookback_days is None:
+            raise ValueError(f"Strategy {stored_strategy.strategy_id} is missing required config field: lookback_days")
+        return cast(
+            Strategy,
+            PrivatePickleStrategy(
+                strategy_id=stored_strategy.config.get("strategy_id", stored_strategy.strategy_id),
+                lookback_days=int(lookback_days),
+                artifact_path=stored_strategy.model_path,
+                feature_config=stored_strategy.feature_config,
             ),
         )
 

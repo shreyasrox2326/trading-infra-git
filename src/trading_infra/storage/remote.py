@@ -266,3 +266,14 @@ def download_paper_decisions(client: R2Client, strategy_id: str) -> pl.DataFrame
         local_path = Path(tmpdir) / "decisions.parquet"
         client.download_file(key, local_path)
         return read_decisions_parquet(local_path)
+
+
+def download_backtest_decisions(client: R2Client, strategy_id: str) -> pl.DataFrame:
+    """Download backtest decisions for a strategy if they exist."""
+    key = backtest_decisions_key(strategy_id)
+    if not client.exists(key):
+        return empty_decisions_frame()
+    with TemporaryDirectory() as tmpdir:
+        local_path = Path(tmpdir) / "decisions.parquet"
+        client.download_file(key, local_path)
+        return read_decisions_parquet(local_path)

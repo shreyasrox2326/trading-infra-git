@@ -35,7 +35,7 @@ jobs:
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
       EXCHANGES: ${{ inputs.exchange || 'NSE BSE' }}
       SKIP_MARKET_REFRESH: ${{ inputs.skip_market_refresh || false }}
-      UPLOAD_RESULTS: ${{ inputs.upload_results != false }}
+      UPLOAD_RESULTS: ${{ github.event_name == 'schedule' || inputs.upload_results }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -46,7 +46,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install project
-        run: python -m pip install -e .
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+          python -m pip install -e . --no-deps
 
       - name: Check R2 budget
         run: python -m trading_infra r2-budget-check
@@ -101,4 +104,14 @@ jobs:
               paper_command+=(--upload-results)
             fi
             "${paper_command[@]}"
+
+            performance_command=(
+              python -m trading_infra performance-refresh
+              --decision-kind paper
+              --exchange "${exchange}"
+            )
+            if [ "${UPLOAD_RESULTS}" = "true" ]; then
+              performance_command+=(--upload-results)
+            fi
+            "${performance_command[@]}"
           done

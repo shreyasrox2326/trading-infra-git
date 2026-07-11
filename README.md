@@ -29,6 +29,8 @@ Primary local CLI entrypoints:
 - `python -m trading_infra strategy-upload`
 - `python -m trading_infra registry-upload`
 - `python -m trading_infra backtest-upload`
+- `python -m trading_infra performance-compute`
+- `python -m trading_infra performance-refresh`
 
 ## Git Boundary
 
@@ -178,7 +180,7 @@ bucket/
     strategies.parquet
 ```
 
-`model.pkl` and `feature_config.yaml` are only needed for ML-based strategies. Storage and upload of these optional artifacts is supported; ML execution is not yet implemented in the runtime contract.
+`model.pkl` and `feature_config.yaml` are optional strategy artifacts. The runtime now supports `private_pickle_v1`, where a private pickled artifact executes against a small in-process public runtime. `feature_config.yaml` is intended as a coarse compatibility manifest, not a disclosure of private logic.
 
 ---
 
@@ -197,6 +199,13 @@ final decision rows for date t
 The strategy may internally use rules, ML models, scores, filters, rankings, or allocation logic.
 
 The infrastructure only stores the final decision output.
+
+Current runnable strategy types:
+
+- `top_n_adj_close`
+- `private_pickle_v1`
+
+For `private_pickle_v1`, the public runtime currently exposes market-data slices and trading dates. The private artifact computes its own internal indicators from those slices and returns canonical decision rows.
 
 ---
 
@@ -224,7 +233,14 @@ decisions/backtest/strategy_id/decisions.parquet
 
 Performance metrics do not need to be permanently stored initially. They can be computed on demand from decision logs, market data, and strategy behavior.
 
+The repo now includes:
+
+- `performance-compute` for local or R2-backed realized performance generation
+- `performance-refresh` for daily cloud-side performance refresh from stored decisions
+
 Full historical backtests, parameter sweeps, model training, and large research jobs stay local. GitHub Actions should not run full backtests, training, or heavy model inference.
+
+Local `backtest-run` now executes in chunked market-data windows with warmup overlap instead of loading the entire local history tree into memory at once. For private pickle-backed strategies, one runtime is reused across all dates in a chunk and precomputes reusable feature tables once per chunk. For full-history local runs, prefer an exchange-scoped path such as `data/import/daily_stock_data_full/exchange=NSE`.
 
 ---
 

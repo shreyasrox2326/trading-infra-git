@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 import polars as pl
+from tqdm import tqdm
 
 from trading_infra.storage.paths import daily_stock_data_prefix
-from trading_infra.storage.r2 import R2Client
+from trading_infra.storage.r2 import R2Client, expected_upload_etag, is_multipart_etag
 
 
 @dataclass(frozen=True)
@@ -22,20 +22,8 @@ class R2SyncResult:
     rows: list[dict[str, Any]]
 
 
-def _sha256(path: Path) -> str:
-    digest = sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _canonical_key(exchange: str, year: int, month: int) -> str:
     return f"{daily_stock_data_prefix(exchange, year, month)}/part.parquet"
-
-
-def _row_count(path: Path) -> int:
-    return int(pl.scan_parquet(path).select(pl.len()).collect().item())
 
 
 def check_r2_sync(
@@ -43,13 +31,20 @@ def check_r2_sync(
     *,
     exchange: str,
     partition_manifest_path: str | Path,
+    show_progress: bool = False,
+    workers: int = 8,
 ) -> R2SyncResult:
     """Compare local partition manifest entries with canonical R2 objects."""
     normalized_exchange = exchange.upper()
     manifest = pl.read_parquet(partition_manifest_path)
-    required = {"exchange", "year", "month", "partition_path", "row_count", "file_size_bytes", "sha256"}
+    required = {"exchange", "year", "month", "partition_path", "file_size_bytes", "md5"}
     missing = required - set(manifest.columns)
     if missing:
+        if missing == {"md5"}:
+            raise ValueError(
+                "Partition manifest is missing columns: ['md5']; regenerate it with "
+                "`python -m trading_infra history-partition-manifest-refresh --history-path ...`."
+            )
         raise ValueError(f"Partition manifest is missing columns: {sorted(missing)}")
     local_rows = [
         row
@@ -65,41 +60,49 @@ def check_r2_sync(
         if key.endswith("/part.parquet")
     }
 
-    rows: list[dict[str, Any]] = []
-    with TemporaryDirectory() as tmpdir:
-        tmp_root = Path(tmpdir)
-        for row in local_rows:
-            key = _canonical_key(row["exchange"], int(row["year"]), int(row["month"]))
-            local_path = Path(row["partition_path"])
-            sync_row = {
-                "exchange": row["exchange"],
-                "year": int(row["year"]),
-                "month": int(row["month"]),
-                "local_partition_path": row["partition_path"],
-                "r2_key": key,
-                "local_row_count": int(row["row_count"]),
-                "r2_row_count": None,
-                "local_file_size": int(row["file_size_bytes"]),
-                "r2_file_size": None,
-                "local_sha256": row["sha256"],
-                "r2_sha256": None,
-                "manifest_entry": True,
-                "status": "MISSING",
-            }
-            if key in r2_keys:
-                downloaded = tmp_root / f"{row['exchange']}-{row['year']}-{row['month']:02d}.parquet"
-                client.download_file(key, downloaded)
-                sync_row["r2_file_size"] = downloaded.stat().st_size
-                sync_row["r2_row_count"] = _row_count(downloaded)
-                sync_row["r2_sha256"] = _sha256(downloaded)
-                sync_row["status"] = (
-                    "OK"
-                    if sync_row["r2_file_size"] == sync_row["local_file_size"]
-                    and sync_row["r2_row_count"] == sync_row["local_row_count"]
-                    and sync_row["r2_sha256"] == sync_row["local_sha256"]
-                    else "STALE"
-                )
-            rows.append(sync_row)
+    def build_sync_row(row: dict[str, Any]) -> dict[str, Any]:
+        key = _canonical_key(row["exchange"], int(row["year"]), int(row["month"]))
+        local_path = Path(row["partition_path"])
+        sync_row = {
+            "exchange": row["exchange"],
+            "year": int(row["year"]),
+            "month": int(row["month"]),
+            "local_partition_path": row["partition_path"],
+            "r2_key": key,
+            "local_file_size": int(row["file_size_bytes"]),
+            "r2_file_size": None,
+            "local_etag": f'"{row["md5"]}"',
+            "r2_etag": None,
+            "manifest_entry": True,
+            "status": "MISSING",
+        }
+        if key in r2_keys:
+            remote = client.head_object(key)
+            sync_row["r2_file_size"] = int(remote["size"])
+            sync_row["r2_etag"] = remote.get("etag")
+            if is_multipart_etag(sync_row["r2_etag"]):
+                sync_row["local_etag"] = expected_upload_etag(local_path, md5_hex=row["md5"])
+            sync_row["status"] = (
+                "OK"
+                if sync_row["r2_file_size"] == sync_row["local_file_size"]
+                and sync_row["r2_etag"] == sync_row["local_etag"]
+                else "STALE"
+            )
+        return sync_row
+
+    worker_count = max(1, workers)
+    if worker_count <= 1:
+        iterable = tqdm(local_rows, desc="r2-sync-check", unit="partition") if show_progress else local_rows
+        rows = [build_sync_row(row) for row in iterable]
+    else:
+        rows = []
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(build_sync_row, row) for row in local_rows]
+            completed = as_completed(futures)
+            if show_progress:
+                completed = tqdm(completed, total=len(futures), desc="r2-sync-check", unit="partition")
+            for future in completed:
+                rows.append(future.result())
 
     for extra_key in sorted(r2_keys - local_keys):
         rows.append(
@@ -109,16 +112,23 @@ def check_r2_sync(
                 "month": None,
                 "local_partition_path": None,
                 "r2_key": extra_key,
-                "local_row_count": None,
-                "r2_row_count": None,
                 "local_file_size": None,
                 "r2_file_size": None,
-                "local_sha256": None,
-                "r2_sha256": None,
+                "local_etag": None,
+                "r2_etag": None,
                 "manifest_entry": False,
                 "status": "EXTRA",
             }
         )
 
+    rows.sort(
+        key=lambda row: (
+            row["exchange"],
+            row["year"] is None,
+            -1 if row["year"] is None else int(row["year"]),
+            -1 if row["month"] is None else int(row["month"]),
+            row["r2_key"],
+        )
+    )
     status = "ok" if all(row["status"] == "OK" for row in rows) else "fail"
     return R2SyncResult(status=status, rows=rows)

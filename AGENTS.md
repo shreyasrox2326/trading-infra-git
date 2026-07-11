@@ -36,6 +36,23 @@ id   = ee7d490cbe5e
 - Use the container workspace path `/workspaces/code/trading-infra-git` for repo operations.
 - Do not run project build, test, or tooling commands on the host machine unless the user explicitly asks for host execution.
 
+## Shell And Container Guidance
+
+- The operator shell is often Windows PowerShell while project commands must run inside container `sh`/`python`.
+- Prefer simple `docker exec infallible_turing sh -lc 'cd /workspaces/code/trading-infra-git && ...'` commands for short repo operations.
+- Avoid deep nested quoting chains such as PowerShell -> Docker -> `sh -lc` -> inline Python when a stdin script is enough.
+- For inline Python inside the container, prefer piping the script over stdin:
+
+```text
+@'
+print("hello from container")
+'@ | docker exec -i infallible_turing python -
+```
+
+- When shell features must work under container `/bin/sh`, use POSIX syntax. Prefer `. ./.env` over `source .env` unless Bash is explicitly required.
+- Prefer `rg` for search when available, but fall back to portable tools (`find`, `grep`, Python) if the container image does not have `rg`.
+- Keep one shell end-to-end for a command when possible instead of mixing host-side path expansion with container-side path assumptions.
+
 ## Core Context
 
 Cloudflare R2 is the private source of truth for persistent data, strategy files, model files, registries, and decision logs.

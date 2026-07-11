@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from hashlib import sha256
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -19,7 +18,7 @@ from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
 from trading_infra.data.fetch_manifest import read_raw_fetch_manifest
 from trading_infra.storage.market_data import MarketDataPartition, list_market_data_partitions
 from trading_infra.storage.paths import daily_stock_data_prefix
-from trading_infra.storage.r2 import R2Client
+from trading_infra.storage.r2 import R2Client, expected_upload_etag, file_md5, is_multipart_etag
 
 
 @dataclass(frozen=True)
@@ -33,7 +32,7 @@ class HistoryUploadResult:
     staging_key: str
     canonical_key: str
     file_size_bytes: int
-    sha256: str
+    md5: str
 
 
 @dataclass(frozen=True)
@@ -43,6 +42,22 @@ class _UploadCandidate:
     local_path: Path
     staging_key: str
     canonical_key: str
+
+
+@dataclass(frozen=True)
+class _PreparedCandidate:
+    partition: MarketDataPartition
+    local_path: Path
+    staging_key: str
+    canonical_key: str
+    file_size_bytes: int
+    md5: str
+
+
+@dataclass(frozen=True)
+class _CheckedCandidate:
+    prepared: _PreparedCandidate
+    status: str
 
 
 def _load_passing_audit(audit_path: str | Path) -> dict:
@@ -64,7 +79,7 @@ def _validate_partition_manifest(path: str | Path) -> None:
     if not manifest_path.exists():
         raise FileNotFoundError(f"Partition manifest not found: {manifest_path}")
     manifest = pl.read_parquet(manifest_path)
-    required = {"exchange", "year", "month", "partition_path", "row_count", "file_size_bytes", "sha256"}
+    required = {"exchange", "year", "month", "partition_path", "row_count", "file_size_bytes", "md5"}
     missing = required - set(manifest.columns)
     if missing:
         raise ValueError(f"Partition manifest is missing columns: {sorted(missing)}")
@@ -106,19 +121,29 @@ def _materialize_upload_partition(source_file: Path, partition: MarketDataPartit
 
 
 def _verify_uploaded_size(client: R2Client, key: str, local_path: Path) -> None:
-    with TemporaryDirectory() as tmpdir:
-        downloaded = Path(tmpdir) / local_path.name
-        client.download_file(key, downloaded)
-        if downloaded.stat().st_size != local_path.stat().st_size:
-            raise ValueError(f"Uploaded object size mismatch for key: {key}")
+    remote = client.head_object(key)
+    if int(remote["size"]) != local_path.stat().st_size:
+        raise ValueError(f"Uploaded object size mismatch for key: {key}")
 
 
-def _sha256(path: Path) -> str:
-    digest = sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def cleanup_staging_prefix(
+    client: R2Client,
+    *,
+    prefix: str,
+    older_than_days: int,
+    dry_run: bool = True,
+) -> list[str]:
+    """List or delete old staging objects under one prefix."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    objects = client.list_objects(prefix)
+    stale_keys = [
+        obj["key"]
+        for obj in objects
+        if obj.get("last_modified") is not None and obj["last_modified"] < cutoff
+    ]
+    if not dry_run:
+        client.delete_keys(stale_keys)
+    return stale_keys
 
 
 def _run_upload_tasks(
@@ -142,6 +167,11 @@ def _run_upload_tasks(
         for future in completed:
             results.append(future.result())
     return results
+
+
+def _prepared_candidate_sort_key(candidate: _PreparedCandidate | _CheckedCandidate) -> tuple[str, int, int]:
+    prepared = candidate.prepared if isinstance(candidate, _CheckedCandidate) else candidate
+    return (prepared.partition.exchange, prepared.partition.year, prepared.partition.month)
 
 
 def upload_verified_history(
@@ -187,18 +217,71 @@ def upload_verified_history(
 
         worker_count = max(1, workers)
 
-        def stage(candidate: _UploadCandidate) -> _UploadCandidate:
+        def prepare(candidate: _UploadCandidate) -> _PreparedCandidate:
             _materialize_upload_partition(candidate.source_file, candidate.partition, candidate.local_path)
-            client.upload_file(candidate.local_path, candidate.staging_key)
-            return candidate
+            return _PreparedCandidate(
+                partition=candidate.partition,
+                local_path=candidate.local_path,
+                staging_key=candidate.staging_key,
+                canonical_key=candidate.canonical_key,
+                file_size_bytes=candidate.local_path.stat().st_size,
+                md5=file_md5(candidate.local_path),
+            )
+
+        prepared = _run_upload_tasks(
+            candidates,
+            prepare,
+            workers=worker_count,
+            description="history-upload prepare",
+            show_progress=show_progress,
+        )
+        prepared = sorted(prepared, key=_prepared_candidate_sort_key)
+
+        selected_exchange_prefixes = sorted({f"data/daily_stock_data/exchange={candidate.partition.exchange}/" for candidate in prepared})
+        canonical_keys = {
+            key
+            for prefix in selected_exchange_prefixes
+            for key in client.list_keys(prefix)
+            if key.endswith("/part.parquet")
+        }
+
+        def compare(prepared_candidate: _PreparedCandidate) -> _CheckedCandidate:
+            status = "MISSING"
+            if prepared_candidate.canonical_key in canonical_keys:
+                remote = client.head_object(prepared_candidate.canonical_key)
+                local_etag = f'"{prepared_candidate.md5}"'
+                if is_multipart_etag(remote.get("etag")):
+                    local_etag = expected_upload_etag(prepared_candidate.local_path, md5_hex=prepared_candidate.md5)
+                status = (
+                    "OK"
+                    if int(remote["size"]) == prepared_candidate.file_size_bytes
+                    and remote.get("etag") == local_etag
+                    else "STALE"
+                )
+            return _CheckedCandidate(prepared=prepared_candidate, status=status)
+
+        checked = _run_upload_tasks(
+            prepared,
+            compare,
+            workers=worker_count,
+            description="history-upload compare",
+            show_progress=show_progress,
+        )
+        checked = sorted(checked, key=_prepared_candidate_sort_key)
+        upload_required = [candidate.prepared for candidate in checked if candidate.status != "OK"]
+
+        def stage(prepared_candidate: _PreparedCandidate) -> _PreparedCandidate:
+            client.upload_file(prepared_candidate.local_path, prepared_candidate.staging_key)
+            return prepared_candidate
 
         staged = _run_upload_tasks(
-            candidates,
+            upload_required,
             stage,
             workers=worker_count,
             description="history-upload stage",
             show_progress=show_progress,
         )
+        staged = sorted(staged, key=_prepared_candidate_sort_key)
 
         _run_upload_tasks(
             staged,
@@ -208,9 +291,9 @@ def upload_verified_history(
             show_progress=show_progress,
         )
 
-        def promote(candidate: _UploadCandidate) -> HistoryUploadResult:
+        def promote(candidate: _PreparedCandidate) -> HistoryUploadResult:
             partition = candidate.partition
-            client.upload_file(candidate.local_path, candidate.canonical_key)
+            client.copy_object(candidate.staging_key, candidate.canonical_key)
             stale_keys = [
                 key
                 for key in client.list_keys(partition.prefix)
@@ -224,8 +307,8 @@ def upload_verified_history(
                 rows=partition.rows,
                 staging_key=candidate.staging_key,
                 canonical_key=candidate.canonical_key,
-                file_size_bytes=candidate.local_path.stat().st_size,
-                sha256=_sha256(candidate.local_path),
+                file_size_bytes=candidate.file_size_bytes,
+                md5=candidate.md5,
             )
 
         results = _run_upload_tasks(
@@ -247,7 +330,7 @@ def upload_verified_history(
             "partition_manifest_path": str(partition_manifest_path),
             "exchange_coverage": sorted({result.exchange for result in results}),
             "partitions": [result.__dict__ for result in results],
-            "upload_status": "promoted",
+            "upload_status": "promoted" if results else "noop",
         }
         client.upload_text("data/daily_stock_data/_manifest.json", json.dumps(manifest, indent=2) + "\n")
         return results

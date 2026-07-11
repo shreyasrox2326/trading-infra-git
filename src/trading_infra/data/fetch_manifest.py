@@ -158,3 +158,61 @@ def write_raw_fetch_manifest(
     target.parent.mkdir(parents=True, exist_ok=True)
     merge_raw_fetch_manifest(existing_path=target, results=results, exchange=exchange).write_parquet(target)
     return target
+
+
+def mark_raw_fetch_manifest_row(
+    path: str | Path,
+    *,
+    target_date,
+    status: str,
+    reason: str,
+    exchange: str | None = None,
+) -> Path:
+    """Mark one manifest row with an explicit reviewed status and reason."""
+    normalized_status = "expected" if status == "missing" else status
+    if normalized_status not in FETCH_STATUS_VALUES:
+        raise ValueError(f"Unsupported fetch manifest status: {status}")
+    target = Path(path)
+    manifest = read_raw_fetch_manifest(target)
+    filters = [pl.col("date") == target_date]
+    if exchange:
+        filters.append(pl.col("exchange") == exchange.upper())
+    predicate = filters[0]
+    for item in filters[1:]:
+        predicate = predicate & item
+    matched = manifest.filter(predicate)
+    if matched.height != 1:
+        raise ValueError(
+            f"Expected exactly one manifest row to mark for date={target_date}"
+            + (f" exchange={exchange.upper()}" if exchange else "")
+            + f"; found {matched.height}."
+        )
+    updated = manifest.with_columns(
+        pl.when(predicate).then(pl.lit(normalized_status)).otherwise(pl.col("status")).alias("status"),
+        pl.when(predicate).then(pl.lit(reason)).otherwise(pl.col("last_error")).alias("last_error"),
+        pl.when(predicate).then(pl.lit(datetime.now(timezone.utc))).otherwise(pl.col("last_attempt_at")).alias("last_attempt_at"),
+    )
+    updated.write_parquet(target)
+    return target
+
+
+def combine_raw_fetch_manifests(
+    paths: list[str | Path],
+    *,
+    output_path: str | Path,
+) -> Path:
+    """Combine per-exchange raw fetch manifests into one deduplicated parquet."""
+    if not paths:
+        raise ValueError("At least one manifest path is required.")
+    frames = [read_raw_fetch_manifest(path) for path in paths]
+    combined = (
+        pl.concat(frames, how="vertical_relaxed")
+        .sort(["exchange", "date"])
+        .unique(subset=["exchange", "date"], keep="last", maintain_order=True)
+        .select(FETCH_MANIFEST_COLUMNS)
+        .cast(FETCH_MANIFEST_SCHEMA)
+    )
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    combined.write_parquet(target)
+    return target

@@ -64,3 +64,13 @@ def backtest_decisions_key(strategy_id: str) -> str:
 def paper_decisions_key(strategy_id: str) -> str:
     """Return the canonical paper decisions object key."""
     return str(PurePosixPath("decisions") / "paper" / strategy_id / "decisions.parquet")
+
+
+def performance_daily_key(strategy_id: str, *, decision_kind: str) -> str:
+    """Return the canonical daily performance object key."""
+    return str(PurePosixPath("performance") / decision_kind / strategy_id / "daily.parquet")
+
+
+def performance_summary_key(strategy_id: str, *, decision_kind: str) -> str:
+    """Return the canonical summary performance object key."""
+    return str(PurePosixPath("performance") / decision_kind / strategy_id / "summary.json")

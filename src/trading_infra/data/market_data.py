@@ -70,6 +70,7 @@ DAILY_STOCK_DATA_SCHEMA: dict[str, pl.DataType] = {
 def load_daily_stock_data(
     path: str | list[str],
     *,
+    start_date: date | None = None,
     as_of_date: date | None = None,
     exchanges: Iterable[str] | None = None,
     symbols: Iterable[str] | None = None,
@@ -88,6 +89,8 @@ def load_daily_stock_data(
             raise ValueError(f"Market data is missing required column: {required}")
 
     filters: list[pl.Expr] = []
+    if start_date is not None:
+        filters.append(pl.col("date") >= pl.lit(start_date))
     if as_of_date is not None:
         filters.append(pl.col("date") <= pl.lit(as_of_date))
     if exchanges:
@@ -104,3 +107,35 @@ def load_daily_stock_data(
 
     selected = filtered.select([pl.col(column).cast(DAILY_STOCK_DATA_SCHEMA[column]) for column in requested_columns])
     return selected.collect().sort(["date", "exchange", "symbol"])
+
+
+def load_trading_dates(
+    path: str | list[str],
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    exchanges: Iterable[str] | None = None,
+) -> list[date]:
+    """Read only the sorted distinct trading dates for the requested slice."""
+    scan = pl.scan_parquet(path)
+
+    if "date" not in scan.collect_schema().names():
+        raise ValueError("Market data is missing required column: date")
+
+    filters: list[pl.Expr] = []
+    if start_date is not None:
+        filters.append(pl.col("date") >= pl.lit(start_date))
+    if end_date is not None:
+        filters.append(pl.col("date") <= pl.lit(end_date))
+    if exchanges:
+        filters.append(pl.col("exchange").is_in(list(exchanges)))
+
+    filtered = scan
+    if filters:
+        predicate = filters[0]
+        for condition in filters[1:]:
+            predicate = predicate & condition
+        filtered = filtered.filter(predicate)
+
+    dates = filtered.select(pl.col("date").cast(pl.Date).unique().sort()).collect()
+    return dates.get_column("date").to_list()
