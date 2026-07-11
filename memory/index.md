@@ -15,6 +15,9 @@ This file is the navigation map for repo memory.
 - [NSE legacy symbol identifier](decisions/2026-06-28-nse-legacy-symbol-identifier.md)
 - [Audit format and manifests](decisions/2026-06-29-audit-format-and-manifests.md)
 - [R2 budget thresholds](decisions/2026-06-29-r2-budget-thresholds.md)
+- [History operator review and upload contract](decisions/2026-07-05-history-operator-review-and-upload-contract.md)
+- [Private flattened pickle strategy direction](decisions/2026-07-05-private-flattened-pickle-strategy-direction.md)
+- [Private pickle runtime contract v1](decisions/2026-07-05-private-pickle-runtime-contract-v1.md)
 
 ## Session Logs
 
@@ -37,6 +40,12 @@ This file is the navigation map for repo memory.
 - [Empty bhavcopy cache guard](logs/2026-06-28-empty-bhavcopy-cache-guard.md)
 - [Audit implementation](logs/2026-06-29-audit-implementation.md)
 - [Operator friction and follow-ups](logs/2026-07-05-operator-friction-and-followups.md)
+- [Operator friction follow-ups implementation](logs/2026-07-05-operator-friction-followups-implementation.md)
+- [V18 V23 V28 port scratchpad](logs/2026-07-05-v18-v23-v28-port-scratchpad.md)
+- [Private strategy artifact options](logs/2026-07-05-private-strategy-artifact-options.md)
+- [Private strategy runtime implementation](logs/2026-07-05-private-strategy-runtime-implementation.md)
+- [V23 V28 trimmed lineage notes](logs/2026-07-05-v23-v28-trimmed-lineage-notes.md)
+- [Final backtest performance architecture](logs/2026-07-05-final-backtest-performance-architecture.md)
 
 ## Open Questions
 
@@ -47,6 +56,8 @@ This file is the navigation map for repo memory.
 - [Historical NSE data plan checklist](2026-06-28-historical-nse-plan-checklist.md)
 - [Full README alignment checklist](2026-06-28-full-readme-alignment-checklist.md)
 - [Audit implementation checklist](2026-06-29-audit-implementation-checklist.md)
+- [Operator friction follow-ups checklist](2026-07-05-operator-friction-followups-checklist.md)
+- [Private strategy runtime and two-strategy port checklist](2026-07-05-private-strategy-runtime-and-two-strat-port-checklist.md)
 
 ## Future Update Rules
 
