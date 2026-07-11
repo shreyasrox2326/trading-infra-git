@@ -9,3 +9,5 @@ __pycache__/
 /performance/
 /registry/
 /strategies/
+/memory/Audit.md
+/env.sh
