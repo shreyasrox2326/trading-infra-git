@@ -11,13 +11,15 @@ import polars as pl
 from trading_infra.decisions import empty_decisions_frame, validate_decisions_frame
 from trading_infra.registry import active_strategy_ids, load_strategy_registry
 from trading_infra.storage.decisions import read_decisions_parquet, write_decisions_parquet
+from trading_infra.storage.market_data_remote import (
+    load_daily_stock_data_history_from_r2,
+    load_daily_stock_data_range_from_r2,
+)
 from trading_infra.storage.paths import paper_decisions_key
 from trading_infra.storage.r2 import R2Client
 from trading_infra.storage.remote import (
     download_paper_decisions,
     download_strategy_artifacts,
-    load_daily_stock_data_history_from_r2,
-    load_daily_stock_data_range_from_r2,
     load_strategy_registry_from_r2,
     upload_paper_decisions,
 )

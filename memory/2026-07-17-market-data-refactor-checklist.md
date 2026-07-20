@@ -12,10 +12,10 @@ Goal: make the market-data codebase modern, maintainable, understandable, and al
 
 ## Phase 1: Clarify R2 Helpers
 
-- [ ] Identify market-data functions currently in `storage/remote.py`.
-- [ ] Move market-data R2 loading helpers to a market-data-specific module.
-- [ ] Leave strategy, registry, and decision helpers behavior unchanged.
-- [ ] Update imports and tests.
+- [x] Identify market-data functions currently in `storage/remote.py`.
+- [x] Move market-data R2 loading helpers to a market-data-specific module.
+- [x] Leave strategy, registry, and decision helpers behavior unchanged.
+- [x] Update imports and tests.
 
 ## Phase 2: Split Raw Fetch And Normalize
 

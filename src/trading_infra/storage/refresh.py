@@ -13,9 +13,9 @@ import polars as pl
 from trading_infra.data.bhavcopy import fetch_bhavcopy_archive, normalize_bhavcopy_inputs
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
 from trading_infra.storage.history import _verify_uploaded_size
+from trading_infra.storage.market_data_remote import list_daily_stock_data_keys
 from trading_infra.storage.paths import daily_stock_data_prefix
 from trading_infra.storage.r2 import R2Client
-from trading_infra.storage.remote import list_daily_stock_data_keys
 
 
 @dataclass(frozen=True)

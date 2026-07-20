@@ -13,12 +13,14 @@ from trading_infra.storage.paths import (
     strategy_metadata_key,
     strategy_model_key,
 )
-from trading_infra.storage.remote import (
-    download_paper_decisions,
-    download_strategy_artifacts,
+from trading_infra.storage.market_data_remote import (
     list_daily_stock_data_keys,
     load_daily_stock_data_from_r2,
     load_daily_stock_data_range_from_r2,
+)
+from trading_infra.storage.remote import (
+    download_paper_decisions,
+    download_strategy_artifacts,
     load_strategy_registry_from_r2,
     upload_strategy_artifacts,
     upload_strategy_registry,

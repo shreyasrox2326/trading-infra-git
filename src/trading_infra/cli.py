@@ -37,6 +37,7 @@ from trading_infra.registry import active_strategy_ids, load_strategy_registry
 from trading_infra.storage.decisions import read_decisions_parquet
 from trading_infra.storage.decisions import write_decisions_parquet
 from trading_infra.storage.market_data import list_market_data_partitions, upload_market_data_partitions
+from trading_infra.storage.market_data_remote import load_daily_stock_data_history_from_r2
 from trading_infra.storage.history import cleanup_staging_prefix, upload_verified_history
 from trading_infra.storage.remote import (
     download_backtest_decisions,
@@ -48,7 +49,6 @@ from trading_infra.storage.remote import (
     upload_strategy_registry,
 )
 from trading_infra.storage.refresh import refresh_market_data_for_date
-from trading_infra.storage.remote import load_daily_stock_data_history_from_r2
 from trading_infra.storage.r2 import R2Client
 from trading_infra.storage.sync import check_r2_sync
 from trading_infra.storage.usage import apply_r2_budget, collect_r2_usage, write_r2_usage_snapshot
