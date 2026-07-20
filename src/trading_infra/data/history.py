@@ -763,7 +763,7 @@ def _merge_date_max(current: date | None, candidate: date | None) -> date | None
     return max(current, candidate)
 
 
-def verify_history_partitions(files: list[Path]) -> dict[str, Any]:
+def verify_history_partitions(files: list[Path], *, show_progress: bool = False) -> dict[str, Any]:
     """Verify history parquet files one partition at a time."""
     rows = 0
     missing_columns: set[str] = set()
@@ -779,7 +779,8 @@ def verify_history_partitions(files: list[Path]) -> dict[str, Any]:
     by_month: list[dict[str, Any]] = []
     partition_summaries: list[dict[str, Any]] = []
 
-    for file in files:
+    iterable = tqdm(files, desc="history-verify", unit="partition") if show_progress else files
+    for file in iterable:
         frame = pl.read_parquet(file)
         audit = verify_history_frame(frame)
         rows += int(audit["rows"])
@@ -902,11 +903,12 @@ def write_history_audit(
     path: str | Path,
     report_path: str | Path,
     max_memory_gb: float | None = None,
+    show_progress: bool = False,
 ) -> dict[str, Any]:
     """Verify a canonical history parquet and write JSON plus a short Markdown report."""
     files = resolve_history_parquet_files(path)
     _enforce_history_verify_memory_cap(files, max_memory_gb)
-    audit = verify_history_partitions(files)
+    audit = verify_history_partitions(files, show_progress=show_progress)
     report = Path(report_path)
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(audit, indent=2, default=_json_default) + "\n", encoding="utf-8")

@@ -194,6 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     history_verify.add_argument("--partition-wise", action="store_true")
     history_verify.add_argument("--streaming", action="store_true")
     history_verify.add_argument("--max-memory-gb", type=float)
+    history_verify.add_argument("--progress", action="store_true", default=True)
+    history_verify.add_argument("--no-progress", dest="progress", action="store_false")
 
     history_doctor = subparsers.add_parser("history-doctor", help="Audit local raw/parquet/R2 history health.")
     history_doctor.add_argument("--exchange", required=True)
@@ -667,6 +669,7 @@ def history_verify(args: argparse.Namespace) -> int:
         path=args.path,
         report_path=args.report_path,
         max_memory_gb=args.max_memory_gb,
+        show_progress=args.progress,
     )
     print(
         f"history-verify path={args.path} report_path={args.report_path} "

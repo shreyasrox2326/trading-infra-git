@@ -6,9 +6,9 @@ Goal: make the market-data codebase modern, maintainable, understandable, and al
 
 ## Phase 0: Small Immediate Fix
 
-- [ ] Add tqdm progress to `history-verify`.
-- [ ] Add `--progress` / `--no-progress` to `history-verify` if needed for consistency.
-- [ ] Run focused tests for history verification.
+- [x] Add tqdm progress to `history-verify`.
+- [x] Add `--progress` / `--no-progress` to `history-verify` if needed for consistency.
+- [x] Run focused tests for history verification.
 
 ## Phase 1: Clarify R2 Helpers
 
