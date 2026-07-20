@@ -42,10 +42,10 @@ Goal: make the market-data codebase modern, maintainable, understandable, and al
 
 ## Phase 5: Final Cleanup
 
-- [ ] Remove or rename ambiguous internal modules only after imports are stable.
-- [ ] Update docs if operator-facing behavior or module names matter.
-- [ ] Run the focused market-data test suite.
-- [ ] Run the full test suite before merging.
+- [x] Review ambiguous internal modules after imports are stable; keep compatibility facades for now.
+- [x] Update docs if operator-facing behavior or module names matter; no operator-facing behavior changed.
+- [x] Run the focused market-data test suite.
+- [x] Run the full test suite before merging.
 
 ## Focused Test Set
 
