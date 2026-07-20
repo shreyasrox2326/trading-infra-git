@@ -15,6 +15,8 @@ import polars as pl
 from trading_infra.data.bhavcopy import (
     BhavcopyRateLimitError,
     fetch_bhavcopy_archives,
+)
+from trading_infra.data.bhavcopy_normalize import (
     write_canonical_bhavcopy_parquet,
 )
 from trading_infra.bootstrap import run_history_bootstrap
@@ -131,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     bhavcopy_ingest = subparsers.add_parser(
         "bhavcopy-ingest",
-        help="Normalize raw NSE bhavcopy files into canonical daily-stock parquet.",
+        help="Small/manual raw bhavcopy to canonical daily-stock parquet converter.",
     )
     bhavcopy_ingest.add_argument("--input-path", required=True)
     bhavcopy_ingest.add_argument("--output-path", required=True)
@@ -154,7 +156,10 @@ def build_parser() -> argparse.ArgumentParser:
     history_fetch.add_argument("--progress", action="store_true", default=True)
     history_fetch.add_argument("--no-progress", dest="progress", action="store_false")
 
-    history_build = subparsers.add_parser("history-build", help="Build canonical full-history market-data parquet.")
+    history_build = subparsers.add_parser(
+        "history-build",
+        help="Build production canonical full-history market-data parquet partitions.",
+    )
     history_build.add_argument("--input-path", required=True)
     history_build.add_argument("--output-path", required=True)
     history_build.add_argument("--exchange", action="append")

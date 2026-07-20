@@ -16,11 +16,13 @@ import polars as pl
 from tqdm import tqdm
 
 from trading_infra.data.bhavcopy import (
+    fetch_bhavcopy_archives,
+)
+from trading_infra.data.bhavcopy_normalize import (
     NonBhavcopyFileError,
     _infer_bhavcopy_format_from_filename,
     _normalize_exchange,
     _resolve_bhavcopy_inputs,
-    fetch_bhavcopy_archives,
     normalize_bhavcopy_file,
     summarize_canonical_bhavcopy,
 )

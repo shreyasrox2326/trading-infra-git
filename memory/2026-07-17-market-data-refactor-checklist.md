@@ -19,11 +19,11 @@ Goal: make the market-data codebase modern, maintainable, understandable, and al
 
 ## Phase 2: Split Raw Fetch And Normalize
 
-- [ ] Separate raw bhavcopy fetch logic from canonical normalization logic.
-- [ ] Keep format lookup behavior unchanged.
-- [ ] Keep `bhavcopy-ingest` available as a small/manual conversion command.
-- [ ] Document that `history-build` is the production full-history builder.
-- [ ] Run bhavcopy and CLI tests.
+- [x] Separate raw bhavcopy fetch logic from canonical normalization logic.
+- [x] Keep format lookup behavior unchanged.
+- [x] Keep `bhavcopy-ingest` available as a small/manual conversion command.
+- [x] Document that `history-build` is the production full-history builder.
+- [x] Run bhavcopy and CLI tests.
 
 ## Phase 3: Split Historical Build And Verify
 
