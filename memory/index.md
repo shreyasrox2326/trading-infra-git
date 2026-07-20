@@ -18,6 +18,7 @@ This file is the navigation map for repo memory.
 - [History operator review and upload contract](decisions/2026-07-05-history-operator-review-and-upload-contract.md)
 - [Private flattened pickle strategy direction](decisions/2026-07-05-private-flattened-pickle-strategy-direction.md)
 - [Private pickle runtime contract v1](decisions/2026-07-05-private-pickle-runtime-contract-v1.md)
+- [Market data refactor direction](decisions/2026-07-17-market-data-refactor-direction.md)
 
 ## Session Logs
 
@@ -58,6 +59,7 @@ This file is the navigation map for repo memory.
 - [Audit implementation checklist](2026-06-29-audit-implementation-checklist.md)
 - [Operator friction follow-ups checklist](2026-07-05-operator-friction-followups-checklist.md)
 - [Private strategy runtime and two-strategy port checklist](2026-07-05-private-strategy-runtime-and-two-strat-port-checklist.md)
+- [Market data refactor checklist](2026-07-17-market-data-refactor-checklist.md)
 
 ## Future Update Rules
 
