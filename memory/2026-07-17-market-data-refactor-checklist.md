@@ -35,10 +35,10 @@ Goal: make the market-data codebase modern, maintainable, understandable, and al
 
 ## Phase 4: Slim CLI
 
-- [ ] Move market-data command handlers out of `cli.py`.
-- [ ] Keep command names and flags stable.
-- [ ] Keep `cli.py` as parser/router rather than business-logic owner.
-- [ ] Run CLI tests and workflow tests.
+- [x] Move market-data command handlers out of `cli.py`.
+- [x] Keep command names and flags stable.
+- [x] Keep `cli.py` as parser/router rather than business-logic owner.
+- [x] Run CLI tests and workflow tests.
 
 ## Phase 5: Final Cleanup
 

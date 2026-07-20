@@ -423,7 +423,7 @@ def test_bhavcopy_fetch_cli(capsys, monkeypatch, tmp_path) -> None:
             self.path = tmp_path / "cm02JAN2026bhav.csv.zip"
             self.message = ""
 
-    monkeypatch.setattr("trading_infra.cli.fetch_bhavcopy_archives", lambda **_kwargs: [_Result()])
+    monkeypatch.setattr("trading_infra.commands.market_data.fetch_bhavcopy_archives", lambda **_kwargs: [_Result()])
 
     exit_code = main(
         [
