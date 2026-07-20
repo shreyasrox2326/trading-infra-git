@@ -13,7 +13,7 @@ from uuid import uuid4
 import polars as pl
 from tqdm import tqdm
 
-from trading_infra.data.history import resolve_history_parquet_files
+from trading_infra.data.history_verify import resolve_history_parquet_files
 from trading_infra.data.market_data import DAILY_STOCK_DATA_COLUMNS
 from trading_infra.data.fetch_manifest import read_raw_fetch_manifest
 from trading_infra.storage.market_data import MarketDataPartition, list_market_data_partitions

@@ -28,9 +28,10 @@ from trading_infra.data.fetch_manifest import (
     write_raw_fetch_manifest,
 )
 from trading_infra.data.formats import inspect_bhavcopy_format
+from trading_infra.data.history_build import build_history_parquet, build_history_partitions
 from trading_infra.data.history_doctor import run_history_doctor
-from trading_infra.data.history import build_history_parquet, build_history_partitions, refresh_partition_manifest
-from trading_infra.data.history import write_history_audit
+from trading_infra.data.history_partitions import refresh_partition_manifest
+from trading_infra.data.history_verify import write_history_audit
 from trading_infra.data.market_data import load_daily_stock_data, load_trading_dates
 from trading_infra.performance import compute_strategy_performance, upload_performance_result, write_performance_result
 from trading_infra.pipelines.backtest import run_backtest, run_backtest_chunked

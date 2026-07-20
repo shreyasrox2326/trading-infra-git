@@ -9,8 +9,9 @@ from typing import Any
 
 from trading_infra.data.bhavcopy import fetch_bhavcopy_archives
 from trading_infra.data.fetch_manifest import default_raw_fetch_manifest_path, write_raw_fetch_manifest
-from trading_infra.data.history import build_history_partitions, write_history_audit
+from trading_infra.data.history_build import build_history_partitions
 from trading_infra.data.history_doctor import run_history_doctor
+from trading_infra.data.history_verify import write_history_audit
 from trading_infra.storage.history import upload_verified_history
 from trading_infra.storage.r2 import R2Client
 
