@@ -28,7 +28,7 @@ Goal: make the market-data codebase modern, maintainable, understandable, and al
 ## Phase 3: Split Historical Build And Verify
 
 - [ ] Move partition-first build logic into a build-focused module.
-- [ ] Move partition manifest generation/refresh into its own module.
+- [x] Move partition manifest generation/refresh into its own module.
 - [x] Move parquet verification/audit logic into a verify-focused module.
 - [ ] Preserve partition-first behavior and existing audit output.
 - [ ] Run history, history upload, and market-data tests.
