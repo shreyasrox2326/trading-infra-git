@@ -135,7 +135,15 @@ Use `git add .` only when all changes should be committed.
 
 Commit format:
 
-    git commit -m "<summary>" -m "<description>"
+Use a commit message file inside the container instead of nested `git commit -m`
+quoting from Windows PowerShell:
+
+    cat > /tmp/commit-msg <<'EOF'
+    <type>: <summary>
+
+    <description>
+    EOF
+    git commit -F /tmp/commit-msg
 
 
 ### What Not To Commit
