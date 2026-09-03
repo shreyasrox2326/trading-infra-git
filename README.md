@@ -1,84 +1,98 @@
-# Backtesting / Paper-Trading Infrastructure Notes
+# NSE/BSE Backtesting and Paper-Trading Infrastructure
 
-```trading-infra-git ```
+This repository implements a Python pipeline for collecting end-of-day NSE and BSE price-volume data, validating it into canonical monthly Parquet partitions, and running versioned technical strategies through local backtests or scheduled paper evaluation. Cloudflare R2 holds durable data and artifacts, while backtest and paper runs share the same compact decision-log contract.
 
-The system is for **pure technical, individual-stock strategies**.
+The scope is deliberately narrow: individual securities, daily price-volume inputs, long-only target weights, and CPU-compatible scheduled execution. It does not ingest fundamentals, news, options, tick data, or order-book data, and this repository makes no trading-performance claim.
 
-Each strategy uses only historical price-volume data for each stock. No fundamentals, news, options, tick data, or order book data are included initially.
+## What Is Implemented
 
-## Getting Started
+- Format-aware NSE/BSE bhavcopy fetching and normalization across legacy and current exchange formats.
+- Partition-first history builds with resumable fetch manifests, monthly partition manifests, repair modes, audits, and local/R2 synchronization checks.
+- Staged, guarded publication to R2 and idempotent daily monthly-partition refreshes.
+- One strategy interface and decision schema shared by backtests and paper runs.
+- Versioned public example strategies and private pickle-backed strategy artifacts through a bounded runtime contract.
+- On-demand realized-performance calculation from decisions and market data.
 
-Operator and setup docs live in:
+## Verified State
+
+As of 2026-09-02, the local canonical history and R2 are synchronized across **27,742,872 rows in 620 monthly partitions**:
+
+- NSE: 11,858,406 rows, 383 partitions, 1994-11-03 through 2026-09-02.
+- BSE: 15,884,466 rows, 237 partitions, 2007-01-02 through 2026-09-02.
+- The partition-wise audit reports zero duplicate keys and zero invalid OHLC rows.
+- The test suite contains 170 passing tests.
+
+The scheduled workflow supports an absent R2 registry as a valid zero-active-strategy deployment. No strategy is currently deployed, so paper and performance stages are expected no-ops. The code path is tested locally, but a post-fix GitHub Actions run has not yet completed; the scheduled service should not be described as verified healthy until that run succeeds.
+
+## Architecture
+
+| Component | Responsibility |
+|---|---|
+| Local environment | Historical fetches, incremental/full builds, verification, research, backtests, and approved uploads |
+| Cloudflare R2 | Canonical monthly market data, strategy artifacts, registry, decision logs, and optional performance outputs |
+| GitHub Actions | One-date market refresh followed by paper and performance processing for active strategies |
+
+Historical publication is intentionally local-first:
+
+```text
+raw exchange files
+    -> reviewed fetch manifests
+    -> canonical monthly Parquet partitions
+    -> partition-wise audit and doctor reports
+    -> staged R2 upload and promotion
+```
+
+After bootstrap, the scheduled path updates only the affected monthly partition for the requested trading date. It does not rebuild history, train models, or rerun full backtests.
+
+## Quick Start
+
+Python 3.11 or newer is required. From a fresh checkout:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.lock
+python -m pip install -e . --no-deps
+python -m pytest -q
+python -m trading_infra --help
+```
+
+The maintained operator workspace runs project commands inside the container documented in `AGENTS.md`. R2-backed commands additionally require the variables documented in `.env.example`. Credentials and private data must remain outside Git.
+
+Common entry points:
+
+```bash
+python -m trading_infra history-fetch --help
+python -m trading_infra history-build --help
+python -m trading_infra history-verify --help
+python -m trading_infra history-upload --help
+python -m trading_infra market-data-refresh --help
+python -m trading_infra paper-dry-run --help
+python -m trading_infra performance-compute --help
+```
+
+## Repository Map
+
+```text
+src/trading_infra/data/         exchange formats, fetch, normalize, build, verify, doctor
+src/trading_infra/storage/      R2 client, object paths, publish, refresh, sync, usage checks
+src/trading_infra/pipelines/    shared backtest and paper orchestration
+src/trading_infra/strategies/   public and private-artifact strategy adapters
+tests/                          unit and integration-style coverage with mocked R2 boundaries
+.github/workflows/              scheduled daily market-data and paper workflow
+docs/                           operator runbook, strategy contract, progress tracker
+memory/                         durable decisions and dated implementation notes
+```
+
+Operator-facing documentation:
 
 - `docs/operator-runbook.md`
 - `docs/strategy-contract.md`
 - `docs/progress-checklist.md`
 
-Primary local CLI entrypoints:
+## Public/Private Boundary
 
-- `python -m trading_infra backtest-run`
-- `python -m trading_infra paper-dry-run`
-- `python -m trading_infra bhavcopy-fetch`
-- `python -m trading_infra bhavcopy-ingest`
-- `python -m trading_infra history-fetch`
-- `python -m trading_infra history-build`
-- `python -m trading_infra history-verify`
-- `python -m trading_infra history-upload`
-- `python -m trading_infra market-data-upload`
-- `python -m trading_infra market-data-refresh`
-- `python -m trading_infra strategy-upload`
-- `python -m trading_infra registry-upload`
-- `python -m trading_infra backtest-upload`
-- `python -m trading_infra performance-compute`
-- `python -m trading_infra performance-refresh`
-
-## Git Boundary
-
-This repo intentionally tracks:
-
-- source code
-- tests
-- GitHub Actions workflows
-- documentation
-- example strategy assets under `examples/`
-
-This repo intentionally does **not** track local/operator working state such as:
-
-- `.env`
-- `data/`
-- `decisions/`
-- `registry/`
-- `strategies/`
-
----
-
-## Core Split
-
-```text
-Cloudflare R2 = online storage / source of truth
-GitHub Actions = daily scheduled processing
-Local machine = research and full backtests
-```
-
-R2 stores datasets, strategy files, model files, registries, and decision logs.
-
-GitHub Actions runs daily jobs and updates online data/results.
-
-The local machine is used for strategy research, training, full backtests, and approved strategy uploads.
-
-The initial historical market-data bootstrap is local-first:
-
-```text
-download raw exchange bhavcopies locally
-    ↓
-build one canonical full-history parquet locally
-    ↓
-verify schema, keys, ranges, counts, and data sanity locally
-    ↓
-upload verified monthly parquet partitions to R2 through staging
-```
-
-After bootstrap, GitHub Actions is the daily cron. It refreshes only the latest exchange bhavcopy date into the affected R2 monthly partition, then runs active paper strategies for that date.
+This repository tracks source code, tests, workflows, documentation, and example strategy assets. It intentionally excludes credentials and operator state under `.env`, `data/`, `decisions/`, `performance/`, `registry/`, and `strategies/`.
 
 ---
 
@@ -205,7 +219,7 @@ Current runnable strategy types:
 - `top_n_adj_close`
 - `private_pickle_v1`
 
-For `private_pickle_v1`, the public runtime currently exposes market-data slices and trading dates. The private artifact computes its own internal indicators from those slices and returns canonical decision rows.
+For `private_pickle_v1`, the public runtime exposes market-data slices, trading dates, and reusable precomputed feature tables. The private artifact applies its own selection logic and returns canonical decision rows.
 
 ---
 
@@ -267,6 +281,8 @@ upload updated decisions to R2
 Daily online computation does **not** rerun full historical backtests.
 
 It only computes the next paper-trading decision for active strategies.
+
+If the registry object is absent, the workflow treats it as an empty registry: market-data refresh still completes, and paper/performance processing exits successfully without loading strategy data.
 
 If the exchange bhavcopy is unavailable for a requested date, such as a holiday, the workflow treats the refresh as a no-op and skips paper evaluation for that exchange/date.
 
@@ -408,36 +424,13 @@ notes
 
 Only active strategies are used in the daily paper-trading job.
 
+The registry itself is optional. Its absence means that no strategies are deployed; a present but malformed registry remains an error.
+
 ---
 
-## Public GitHub / Private R2
+## R2 Credentials
 
-GitHub repo can be public.
-
-It contains:
-
-```text
-pipeline code
-strategy runner code
-GitHub Actions workflows
-example configs
-documentation
-```
-
-Cloudflare R2 remains private.
-
-It contains:
-
-```text
-Parquet market data
-strategy files
-model files
-backtest decision logs
-paper decision logs
-strategy registry
-```
-
-R2 credentials are stored as GitHub Actions secrets:
+Cloudflare R2 remains private. R2 credentials are stored as GitHub Actions secrets:
 
 ```text
 R2_ACCESS_KEY_ID
@@ -478,32 +471,24 @@ The project remains **Python-first**.
 
 Rust will not be added in the initial version.
 
-Current stack:
+Current runtime stack:
 
 ```text
 Python
-Polars / DuckDB for Parquet scans and transformations
-NumPy for array computation
-PyTorch / sklearn / XGBoost / LightGBM for modelling
+Polars for Parquet scans, validation, and transformations
+Pandas / NumPy for the private strategy feature runtime
+Boto3 for the S3-compatible R2 API
 GitHub Actions for scheduled daily processing
 Cloudflare R2 for object storage
-local machine for research/backtesting/training
 ```
 
-Rust remains a possible future optimization only if profiling proves a specific bottleneck.
+Model-training libraries are not part of the deployed runtime dependency set. Rust remains a possible future optimization only if profiling proves a specific bottleneck.
 
 ---
 
-## Local Compute
+## Compute Boundaries
 
-Local machine:
-
-```text
-6-core CPU
-RTX 3050 GPU
-```
-
-Use local hardware for:
+Use local compute for:
 
 ```text
 strategy research
@@ -514,20 +499,7 @@ parameter sweeps
 performance analysis
 ```
 
-Use optimized libraries:
-
-```text
-Polars / DuckDB → multithreaded data processing
-NumPy           → native array computation
-PyTorch         → GPU training/inference experiments
-joblib / multiprocessing → independent sweeps
-```
-
----
-
-## Online Compute
-
-Online daily jobs should be treated as **CPU-only**.
+Research code may use additional local dependencies, but they are intentionally separate from this package's scheduled runtime. Online daily jobs are treated as **CPU-only**.
 
 The deployed strategy/model must be small enough to run cheaply in GitHub Actions.
 
@@ -552,7 +524,7 @@ final decision rows
 append to paper decisions
 ```
 
-Train and experiment locally. Deploy only compact finalized strategies/models online.
+Train and experiment locally. Deploy only compact finalized strategies or models online.
 
 ---
 
@@ -564,31 +536,18 @@ Performance is computed from:
 decision log + market data + strategy behavior
 ```
 
-This can produce:
+The current implementation produces:
 
 ```text
 daily returns
-portfolio multiple
+cumulative portfolio multiple
+invested and cash weight
 drawdown
-CAGR
-Sharpe
-turnover
-trade reconstruction if needed
+summary final multiple and maximum drawdown
 ```
+
+Returns are currently realized from the next available adjusted close. CAGR, Sharpe, turnover, transaction costs, and trade reconstruction are not implemented metrics.
 
 Performance tables are not required as permanent first-class storage initially.
 
 They can be computed on demand. Optional derived outputs can be added later only if repeated computation becomes slow.
-
----
-
-## Final Setup
-
-```text
-R2 stores persistent data, strategies, models, registries, and decisions.
-GitHub Actions updates daily market data and paper decisions.
-Local machine builds strategies, trains models, and uploads backtest decisions.
-Performance is computed on demand from decisions + market data.
-```
-
-This keeps storage thin, treats strategies as blackboxes, keeps backtest and paper outputs symmetric, and avoids premature optimization.
