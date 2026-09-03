@@ -27,7 +27,7 @@ Target operating state from the README:
 4. Backtest decisions can be uploaded to R2 as canonical `decisions.parquet`.
 5. A strategy can be activated in the registry.
 6. GitHub Actions can fetch or update daily market data, run active strategies, append daily paper decisions, and upload the updated result.
-7. Optional ML artifacts can be stored; ML execution requires a separate runtime contract before it is considered complete.
+7. Optional ML artifacts can be stored and private pickle-backed strategies can execute through a versioned runtime contract.
 
 ## Phase Checklist
 
@@ -46,7 +46,7 @@ Target operating state from the README:
 - `DONE` Raw NSE and BSE bhavcopy archives can be fetched into ignored local operator state.
 - `DONE` Raw NSE and BSE bhavcopies can be normalized into canonical parquet with identity adjustments.
 - `DONE` Historical fetch/build/verify/upload now use explicit format registry, raw fetch manifests, partition manifests, partition-wise verification, doctor reports, R2 sync checks, and upload guardrails.
-- `PARTIAL` R2 currently contains verified NSE history: 5,786,247 rows, 126 monthly partitions, 2016-01-01 to 2026-06-25. Full NSE 1994+ and BSE 2007+ bootstrap still requires local assembly, user audit approval, and one-time verified upload.
+- `DONE` Local canonical history and R2 are synchronized through 2026-09-02: NSE has 11,858,406 rows in 383 monthly partitions from 1994-11-03; BSE has 15,884,466 rows in 237 monthly partitions from 2007-01-02. The combined partition-wise audit covers 27,742,872 rows and passes with zero duplicate keys and zero invalid OHLC rows.
 - `PARTIAL` Delivery fields are nullable when the raw bhavcopy source does not include them.
 - `TODO` Corporate-action adjustment data is not integrated.
 - `DONE` The source adapter handles NSE/BSE legacy and UDiFF/common bhavcopy files.
@@ -67,6 +67,7 @@ Target operating state from the README:
 - `DONE` The workflow refreshes market data on R2 before paper evaluation.
 - `DONE` Automated daily market-data refresh is wired into GitHub Actions.
 - `DONE` The workflow now refreshes realized paper performance daily through `performance-refresh`.
+- `DONE` A missing R2 strategy registry is treated as zero active strategies, so strategy deployment is optional and does not block market-data refresh.
 
 ### Phase 5: ML Strategy Readiness
 
@@ -80,18 +81,15 @@ Target operating state from the README:
 
 These are the active gaps between the documented target state and the current implementation.
 
-1. Full historical bootstrap is not complete on R2.
-   The local build/verify/upload commands exist, but the user still needs to assemble full NSE 1994+ and BSE 2007+ data locally, inspect the audit, and approve the one-time R2 replacement.
-
-2. Private strategy execution is narrow.
-   The runtime now supports `private_pickle_v1`, but the public contract is intentionally small and exposes only market-data slices plus trading dates.
-
-3. Corporate-action adjustment is identity-only.
+1. Corporate-action adjustment is identity-only.
    No corporate-action source or back-adjustment method has been selected.
+
+2. Private strategy execution remains intentionally bounded.
+   `private_pickle_v1` exposes market-data slices, trading dates, and reusable precomputed feature tables. Add runtime methods only when a real strategy requires another stable capability.
 
 ## Immediate Next Milestones
 
-1. Run `history-bootstrap --upload false` for local full-history NSE+BSE assembly and inspect `history_audit` plus `history_doctor`.
-2. Approve and run one-time guarded `history-upload` to replace/extend R2 market data.
+1. Deploy the empty-registry behavior and verify the next scheduled GitHub Actions market-data refresh succeeds with zero active strategies.
+2. Keep NSE and BSE current through the normal daily refresh workflow and periodically confirm local/R2 synchronization.
 3. Decide corporate-action adjustment source and method.
 4. Broaden the private runtime only when a real strategy needs another stable method.

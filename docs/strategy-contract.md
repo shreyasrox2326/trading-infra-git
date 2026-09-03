@@ -166,6 +166,8 @@ Activation rule:
 
 - `status == "active"` means the strategy runs in daily paper processing.
 - Any other status means it does not run.
+- If `registry/strategies.parquet` is absent from R2, the daily workflow treats it as an empty registry and runs no strategies.
+- A registry that exists but is malformed remains an error.
 
 Recommended additional columns:
 

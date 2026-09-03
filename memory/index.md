@@ -19,6 +19,7 @@ This file is the navigation map for repo memory.
 - [Private flattened pickle strategy direction](decisions/2026-07-05-private-flattened-pickle-strategy-direction.md)
 - [Private pickle runtime contract v1](decisions/2026-07-05-private-pickle-runtime-contract-v1.md)
 - [Market data refactor direction](decisions/2026-07-17-market-data-refactor-direction.md)
+- [Empty R2 strategy registry](decisions/2026-09-03-empty-r2-strategy-registry.md)
 
 ## Session Logs
 
@@ -47,6 +48,7 @@ This file is the navigation map for repo memory.
 - [Private strategy runtime implementation](logs/2026-07-05-private-strategy-runtime-implementation.md)
 - [V23 V28 trimmed lineage notes](logs/2026-07-05-v23-v28-trimmed-lineage-notes.md)
 - [Final backtest performance architecture](logs/2026-07-05-final-backtest-performance-architecture.md)
+- [R2 catch-up and empty strategy deployment](logs/2026-09-03-r2-catchup-and-empty-strategy-deployment.md)
 
 ## Open Questions
 

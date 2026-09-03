@@ -393,6 +393,7 @@ Important daily-run behavior:
 
 - the workflow fetches raw bhavcopy into temporary runner state only
 - the durable output is canonical cleaned parquet plus paper decisions
+- a missing R2 strategy registry is a valid zero-active-strategy state; market-data refresh still succeeds and paper/performance processing becomes a no-op
 - full-history raw bhavcopies remain local/operator state and are not kept as canonical R2 artifacts
 - rerunning the same date should not create duplicate market-data rows
 - rerunning the same date should not create duplicate paper-decision rows
