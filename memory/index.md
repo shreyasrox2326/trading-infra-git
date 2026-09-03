@@ -49,6 +49,7 @@ This file is the navigation map for repo memory.
 - [V23 V28 trimmed lineage notes](logs/2026-07-05-v23-v28-trimmed-lineage-notes.md)
 - [Final backtest performance architecture](logs/2026-07-05-final-backtest-performance-architecture.md)
 - [R2 catch-up and empty strategy deployment](logs/2026-09-03-r2-catchup-and-empty-strategy-deployment.md)
+- [Resume polish handoff](logs/2026-09-03-resume-polish-handoff.md)
 
 ## Open Questions
 
