@@ -105,6 +105,8 @@ def run_daily_paper_job_from_r2(
     """Run the daily paper workflow using R2-backed inputs."""
     registry = load_strategy_registry_from_r2(client)
     active_ids = active_strategy_ids(registry)
+    if not active_ids:
+        return {}
 
     with TemporaryDirectory() as tmpdir:
         workspace = Path(tmpdir)

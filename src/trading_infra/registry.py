@@ -16,6 +16,16 @@ REGISTRY_REQUIRED_COLUMNS: tuple[str, ...] = (
 )
 
 
+def empty_strategy_registry() -> pl.DataFrame:
+    """Return an empty registry with the required canonical columns."""
+    return pl.DataFrame(
+        {
+            column: pl.Series(name=column, values=[], dtype=pl.Utf8)
+            for column in REGISTRY_REQUIRED_COLUMNS
+        }
+    )
+
+
 @dataclass(frozen=True)
 class RegistryEntry:
     """Typed view of a strategy registry row."""

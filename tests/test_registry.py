@@ -7,6 +7,7 @@ from trading_infra.registry import (
     REGISTRY_REQUIRED_COLUMNS,
     active_strategies,
     active_strategy_ids,
+    empty_strategy_registry,
     load_strategy_registry,
     registry_entries,
 )
@@ -26,6 +27,13 @@ def test_load_strategy_registry_from_frame() -> None:
 
     assert all(column in loaded.columns for column in REGISTRY_REQUIRED_COLUMNS)
     assert loaded.height == 2
+
+
+def test_empty_strategy_registry_is_valid() -> None:
+    registry = empty_strategy_registry()
+
+    assert registry.columns == list(REGISTRY_REQUIRED_COLUMNS)
+    assert active_strategy_ids(registry) == []
 
 
 def test_load_strategy_registry_from_path(tmp_path) -> None:

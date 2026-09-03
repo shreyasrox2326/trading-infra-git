@@ -2,6 +2,8 @@ from datetime import date
 from pathlib import Path
 
 import polars as pl
+import pytest
+from botocore.exceptions import ClientError
 
 from trading_infra.decisions import example_decision_row
 from trading_infra.storage.config import R2Config
@@ -319,6 +321,44 @@ def test_load_strategy_registry_from_r2(monkeypatch, tmp_path) -> None:
     loaded = load_strategy_registry_from_r2(client)
 
     assert loaded.get_column("strategy_id").to_list() == ["momentum_v1"]
+
+
+def test_load_strategy_registry_from_r2_returns_empty_when_missing(monkeypatch) -> None:
+    client = _fake_client(monkeypatch)
+
+    def _missing(*_args, **_kwargs):
+        raise ClientError(
+            {
+                "Error": {"Code": "404", "Message": "Not Found"},
+                "ResponseMetadata": {"HTTPStatusCode": 404},
+            },
+            "HeadObject",
+        )
+
+    monkeypatch.setattr(client, "download_file", _missing)
+
+    loaded = load_strategy_registry_from_r2(client)
+
+    assert loaded.is_empty()
+    assert loaded.columns == ["strategy_id", "version", "status"]
+
+
+def test_load_strategy_registry_from_r2_preserves_non_missing_errors(monkeypatch) -> None:
+    client = _fake_client(monkeypatch)
+
+    def _forbidden(*_args, **_kwargs):
+        raise ClientError(
+            {
+                "Error": {"Code": "AccessDenied", "Message": "Forbidden"},
+                "ResponseMetadata": {"HTTPStatusCode": 403},
+            },
+            "HeadObject",
+        )
+
+    monkeypatch.setattr(client, "download_file", _forbidden)
+
+    with pytest.raises(ClientError):
+        load_strategy_registry_from_r2(client)
 
 
 def test_upload_strategy_registry(monkeypatch, tmp_path) -> None:

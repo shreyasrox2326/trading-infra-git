@@ -5,7 +5,8 @@ import polars as pl
 import pytest
 
 from trading_infra.data.market_data import load_daily_stock_data
-from trading_infra.pipelines.paper import append_paper_decisions, run_daily_paper_job
+from trading_infra.pipelines.paper import append_paper_decisions, run_daily_paper_job, run_daily_paper_job_from_r2
+from trading_infra.registry import empty_strategy_registry
 from trading_infra.storage.decisions import read_decisions_parquet, write_decisions_parquet
 
 
@@ -257,6 +258,30 @@ def test_run_daily_paper_job_fails_for_missing_registry(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError):
         run_daily_paper_job(base_path=tmp_path, market_data=market_data, as_of_date=date(2026, 1, 2))
+
+
+def test_r2_paper_job_is_noop_when_registry_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "trading_infra.pipelines.paper.load_strategy_registry_from_r2",
+        lambda _client: empty_strategy_registry(),
+    )
+
+    def _unexpected_market_load(*_args, **_kwargs):
+        raise AssertionError("An empty registry must not trigger a market-data download.")
+
+    monkeypatch.setattr(
+        "trading_infra.pipelines.paper.load_daily_stock_data_history_from_r2",
+        _unexpected_market_load,
+    )
+
+    results = run_daily_paper_job_from_r2(
+        client=object(),
+        exchange="NSE",
+        as_of_date=date(2026, 1, 2),
+        upload_results=True,
+    )
+
+    assert results == {}
 
 
 def test_run_daily_paper_job_fails_for_missing_strategy_artifacts(tmp_path) -> None:

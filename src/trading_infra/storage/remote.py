@@ -6,9 +6,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import polars as pl
+from botocore.exceptions import ClientError
 
 from trading_infra.decisions import empty_decisions_frame
-from trading_infra.registry import load_strategy_registry
+from trading_infra.registry import empty_strategy_registry, load_strategy_registry
 from trading_infra.storage.decisions import read_decisions_parquet, write_decisions_parquet
 from trading_infra.storage.market_data_remote import (
     list_daily_stock_data_keys,
@@ -44,10 +45,17 @@ def download_strategy_artifacts(client: R2Client, strategy_id: str, target_dir: 
 
 
 def load_strategy_registry_from_r2(client: R2Client) -> pl.DataFrame:
-    """Download and validate the strategy registry from R2."""
+    """Download and validate the strategy registry, or return empty when absent."""
     with TemporaryDirectory() as tmpdir:
         local_path = Path(tmpdir) / "strategies.parquet"
-        client.download_file(registry_strategies_key(), local_path)
+        try:
+            client.download_file(registry_strategies_key(), local_path)
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if str(error.get("Code")) not in {"404", "NoSuchKey", "NotFound"} and status != 404:
+                raise
+            return empty_strategy_registry()
         return load_strategy_registry(local_path)
 
 
